@@ -1,5 +1,64 @@
+[project]
+name = "bt"
+version = "1.1.2"
+description = "A flexible backtesting framework for Python"
+authors = [
+    {name = "Philippe Morissette", email = "morissette.philippe@gmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.13"
+keywords = ["python", "finance", "quant", "backtesting", "strategies", "algotrading", "algorithmic", "trading"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "ffn>=1.1.2",
+    "pyprind>=2.11.3",
+    "tqdm>=4.67.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/pmorissette/bt"
+
 [build-system]
-requires = ["setuptools", "wheel", "cython>=0.29.25"]
+requires = ["hatchling", "cython>=3.2.1"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "pytest>=9.0.1",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["bt"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/bt",
+    "/tests",
+    "/LICENSE",
+    "/README.md",
+]
+exclude = [
+    "*.pyc",
+    "*.pyo",
+    "*~",
+    ".git",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".DS_Store",
+]
 
 [tool.ruff]
 line-length = 180
