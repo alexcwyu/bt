@@ -1125,7 +1125,12 @@ class WeighInvVol(Algo):
 
         t0 = target.now - self.lag
         prc = target.universe.loc[t0 - self.lookback : t0, selected]
-        tw = bt.ffn.calc_inv_vol_weights(prc.to_returns().dropna())
+        returns = prc.to_returns().dropna()
+        # Explicit axis=0 to compute per-column std and avoid FutureWarning
+        # from pandas (axis=None will reduce over both axes in a future version)
+        vol = 1.0 / returns.std(axis=0, ddof=1)
+        vol[np.isinf(vol)] = np.nan
+        tw = vol / vol.sum()
         target.temp["weights"] = tw.dropna()
         return True
 
@@ -1619,6 +1624,66 @@ class CapitalFlow(Algo):
 
     def __call__(self, target):
         target.adjust(self.amount)
+        return True
+
+
+class CorporateActions(Algo):
+    """
+    Used to model dividends and share splits.
+
+    This Algo can be used to model dividend flows and share splits. This
+    allows the backtest to be run using unadjusted price data and to get
+    historically correct transactions (position sizes and commissions).
+
+    Security positions are adjusted on dates where a split value other than
+    1.0 is given. A value above 1.0 causes the position size to increase
+    (compared to the previous date) and vice versa.
+
+    On a given date, a position on a security causes a cash inflow (when
+    long) or outflow (when short) given by the size of the position times
+    the amount in the `dividends` dataframe. Cash adjustments are made on
+    the `ex` date given as input, since payment date information is not
+    easily obtainable.
+
+    This Algo must run at every iteration to be able to change security
+    positions as required by splits. All dates in the `dividends`and
+    `splits` dataframes must exist in the price data for the calculations
+    to work correctly.
+
+    Args:
+        * dividends (dataframe): dataframe of dividend amounts per unit of
+          security, indexed by `ex` date. Values should be 0.0 or NaN when
+          there is no dividend.
+        * splits (dataframe): dataframe of split ratios from previous date.
+          Values should be 1.0 or NaN when there is no split.
+
+    """
+
+    def __init__(self, dividends, splits):
+        super(CorporateActions, self).__init__()
+        self.dividends = dividends.fillna(0.0)
+        self.splits = splits.fillna(1.0)
+
+    def __call__(self, target):
+        # adjust last position if there is a split
+        if target.now in self.splits.index:
+            for c in target.children:
+                if c in self.splits.columns:
+                    spl = self.splits.loc[target.now, c]
+                    if spl != 1.0:
+                        target.children[c]._position *= spl
+
+        # adjust capital due to dividends
+        if target.now in self.dividends.index:
+            div_inflow = 0.0
+            for c in target.children:
+                if c in self.dividends.columns:
+                    div = self.dividends.loc[target.now, c]
+                    if div != 0.0:
+                        div_inflow += div * target.children[c]._position
+
+            target.adjust(div_inflow, flow=False)
+
         return True
 
 
@@ -2181,7 +2246,7 @@ class SimulateRFQTransactions(Algo):
 def _get_unit_risk(security, data, index=None):
     try:
         unit_risks = data[security]
-        unit_risk = unit_risks.values[index]
+        unit_risk = unit_risks.iloc[index]
     except Exception:
         # No risk data, assume zero
         unit_risk = 0.0
