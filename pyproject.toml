@@ -41,11 +41,11 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["bt"]
+packages = ["src/bt"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/bt",
+    "/src/bt",
     "/tests",
     "/LICENSE",
     "/README.md",
@@ -63,5 +63,23 @@ exclude = [
 [tool.ruff]
 line-length = 180
 
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PERF", "TC", "PTH"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bt"]
+
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = ["-ra", "-q", "--strict-markers", "--import-mode=importlib"]
+testpaths = ["tests"]
+pythonpath = ["src"]
+xfail_strict = true
+filterwarnings = ["error"]

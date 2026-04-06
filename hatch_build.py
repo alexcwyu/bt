@@ -15,15 +15,15 @@ class CustomBuildHook(BuildHookInterface):
             # Try to compile with Cython
             print("Compiling bt/core.py with Cython...")
             subprocess.run(
-                ["cython", "bt/core.py", "-o", "bt/core.c"],
+                ["cython", "src/bt/core.py", "-o", "src/bt/core.c"],
                 check=True,
                 cwd=self.root
             )
             print("Cython compilation successful!")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             print(f"Cython compilation failed or Cython not found: {e}")
-            print("Checking if pre-compiled bt/core.c exists...")
-            core_c_path = os.path.join(self.root, "bt", "core.c")
+            print("Checking if pre-compiled src/bt/core.c exists...")
+            core_c_path = os.path.join(self.root, "src", "bt", "core.c")
             if not os.path.exists(core_c_path):
                 raise RuntimeError(
                     "Cython compilation failed and no pre-compiled bt/core.c found. "
