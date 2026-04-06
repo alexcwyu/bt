@@ -1,5 +1,8 @@
 # bt -- Flexible Backtesting Framework
 
+> **Last Updated**: 2026-04-06T16:25:30Z  \
+> **Git Hash**: `ebe814b`
+
 **Flexible backtesting for testing quantitative trading strategies**
 
 - **Repository**: [github.com/pmorissette/bt](https://github.com/pmorissette/bt)
