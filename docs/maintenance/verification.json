@@ -1,0 +1,308 @@
+{
+  "repository": "bt",
+  "source_commit_before_documentation_commit": "aaec640c90a73e7784abeda07eb51533b491c791",
+  "recorded_on": "2026-10-12",
+  "records": [
+    {
+      "command": "uv run --no-sync python -c import bt,bt.core; print(bt.__file__); print(bt.core.__file__)",
+      "exit_code": 0,
+      "seconds": 4.65,
+      "check": "artifact-import",
+      "original_log": "bt-artifact-import.log",
+      "log_sha256": "b094c527007f26613af64abd3e3e022bf8485baa74d4a158fdfbbf2aa5303531",
+      "outcomes": []
+    },
+    {
+      "command": "uv build --python 3.14",
+      "exit_code": 0,
+      "seconds": 14.68,
+      "check": "build",
+      "original_log": "bt-build.log",
+      "log_sha256": "3d0ba27292e97908e17d61a30237b80449ca583691edb805dea635755d1586d2",
+      "outcomes": [
+        "Successfully built dist/bt-1.4.1.tar.gz",
+        "Successfully built dist/bt-1.4.1-cp314-cp314-macosx_27_0_arm64.whl"
+      ]
+    },
+    {
+      "command": "uv build --python 3.14",
+      "exit_code": 0,
+      "seconds": 10.67,
+      "check": "build-final",
+      "original_log": "bt-build-final.log",
+      "log_sha256": "4f459fd03ddcf7253e9e69b82c80da4c15bfd73e48e038cd1c65dbca7d7e8ef0",
+      "outcomes": [
+        "Successfully built dist/bt-1.4.1.tar.gz",
+        "Successfully built dist/bt-1.4.1-cp314-cp314-macosx_27_0_arm64.whl"
+      ]
+    },
+    {
+      "command": "uv build --python 3.15",
+      "exit_code": 0,
+      "seconds": 30.19,
+      "check": "build-selected-python",
+      "original_log": "bt-build-selected-python.log",
+      "log_sha256": "a13da619e63b4a070d5ef0e82c7d405a530674cecbeedd00fbf8fd5cdf1d52e4",
+      "outcomes": [
+        "Successfully built dist/bt-1.4.1.tar.gz",
+        "Successfully built dist/bt-1.4.1-cp315-cp315-macosx_27_0_arm64.whl"
+      ]
+    },
+    {
+      "command": "uv build --python 3.15",
+      "exit_code": 0,
+      "seconds": 21.95,
+      "check": "build-vendor-source-archive",
+      "original_log": "bt-build-vendor-source-archive.log",
+      "log_sha256": "409f4a063843c9bbbd4888962da10f1213b0b8f238c9332a545c7ec37f129741",
+      "outcomes": [
+        "Successfully built dist/bt-1.4.1.tar.gz",
+        "Successfully built dist/bt-1.4.1-cp315-cp315-macosx_27_0_arm64.whl"
+      ]
+    },
+    {
+      "command": "/Users/alex/.local/share/uv/python/cpython-3.14-macos-aarch64-none/bin/python3.14 -m compileall -q src",
+      "exit_code": 0,
+      "seconds": 0.08,
+      "check": "compile",
+      "original_log": "bt-compile.log",
+      "log_sha256": "cdad8d31f71f9ca30ecb973875a31a35e82562441812821f059e0f67f0cb87cf",
+      "outcomes": []
+    },
+    {
+      "command": "uv run --no-sync python -m compileall -q src",
+      "exit_code": 0,
+      "seconds": 0.07,
+      "check": "compile-final",
+      "original_log": "bt-compile-final.log",
+      "log_sha256": "18836bd061fd2cbbcee4cfbe11a0c5bb8956a47a78decc98b17bdc695bd896a7",
+      "outcomes": []
+    },
+    {
+      "command": "uv run --no-sync python -m compileall -q src",
+      "exit_code": 0,
+      "seconds": 0.14,
+      "check": "compile-selected-python",
+      "original_log": "bt-compile-selected-python.log",
+      "log_sha256": "18836bd061fd2cbbcee4cfbe11a0c5bb8956a47a78decc98b17bdc695bd896a7",
+      "outcomes": []
+    },
+    {
+      "command": "uv lock --upgrade --python 3.14",
+      "exit_code": 0,
+      "seconds": 0.88,
+      "check": "lock-3.14",
+      "original_log": "bt-lock-3.14.log",
+      "log_sha256": "0420b1bb3db252ff00292c29107579c4a016a89540f48a20c1cc5f40d5cb46f0",
+      "outcomes": []
+    },
+    {
+      "command": "uv lock --upgrade --python 3.15",
+      "exit_code": 0,
+      "seconds": 0.56,
+      "check": "lock-3.15",
+      "original_log": "bt-lock-3.15.log",
+      "log_sha256": "5b6f1d4c781f70ce2e23dbc5ca2f488ef04113b11217099f245bd644525e790b",
+      "outcomes": []
+    },
+    {
+      "command": "uv lock --upgrade --python 3.14",
+      "exit_code": 0,
+      "seconds": 0.4,
+      "check": "lock-ffn-numeric-boundary",
+      "original_log": "bt-lock-ffn-numeric-boundary.log",
+      "log_sha256": "c3ccbc5e76e4dcf4c6fd576f779686d41407c39fe0f7f2f57d0e423b721d1353",
+      "outcomes": []
+    },
+    {
+      "command": "uv lock --upgrade --python 3.15",
+      "exit_code": 0,
+      "seconds": 0.98,
+      "check": "lock-python315-source-supported",
+      "original_log": "bt-lock-python315-source-supported.log",
+      "log_sha256": "e829c762d7b23d149e0b8ea2a0c9647b640a1626a65c646f1ee62523f1be0721",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --directory /tmp/trading-python315-probes/bt --all-extras --all-groups --python 3.15",
+      "exit_code": 0,
+      "seconds": 48.14,
+      "check": "python315-source-probe",
+      "original_log": "bt-python315-source-probe.log",
+      "log_sha256": "a38fdca15088b758571521e1b5f33108394ca5139546d7fbe73a9f0abe14dea1",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.14",
+      "exit_code": 0,
+      "seconds": 26.35,
+      "check": "sync-3.14",
+      "original_log": "bt-sync-3.14.log",
+      "log_sha256": "b9cf963515ee8472ee5d5295da89f01cb6dbde3afa0582df2b4a7fb3be9ae272",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.14",
+      "exit_code": 0,
+      "seconds": 16.53,
+      "check": "sync-ffn-numeric-boundary",
+      "original_log": "bt-sync-ffn-numeric-boundary.log",
+      "log_sha256": "e3cb327f5243e30341ce626a5316eb6e27318e64a5898a114896c44afe699ebb",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.14",
+      "exit_code": 0,
+      "seconds": 0.13,
+      "check": "sync-pandas-compatibility",
+      "original_log": "bt-sync-pandas-compatibility.log",
+      "log_sha256": "162fb30588ff6b057eac44cfae75eba91f025835840383b4b44665660c2914f4",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.15",
+      "exit_code": 0,
+      "seconds": 41.24,
+      "check": "sync-python315-source-supported",
+      "original_log": "bt-sync-python315-source-supported.log",
+      "log_sha256": "573e8df1c7894252f3042d87f7a2128d88a6de5d07bebf8499111e503b28c660",
+      "outcomes": []
+    },
+    {
+      "command": "uv run --no-sync python -m pytest",
+      "exit_code": 1,
+      "seconds": 18.26,
+      "check": "tests",
+      "original_log": "bt-tests.log",
+      "log_sha256": "19a5b39bd8b50e46501f1bf2e5c77e0d0962c1a86999c6e1c029937076ed46f0",
+      "outcomes": [
+        "4 failed, 805 passed in 16.38s"
+      ]
+    },
+    {
+      "command": "uv run --no-sync python -m pytest",
+      "exit_code": 0,
+      "seconds": 16.13,
+      "check": "tests-ffn-numeric-boundary",
+      "original_log": "bt-tests-ffn-numeric-boundary.log",
+      "log_sha256": "319a913e149f1d223fcf2d1f7d713d1ef24b22c1c1daed482b85d10820448109",
+      "outcomes": [
+        "809 passed in 14.79s"
+      ]
+    },
+    {
+      "command": "uv run --no-sync python -m pytest",
+      "exit_code": 0,
+      "seconds": 23.55,
+      "check": "tests-numeric-boundaries",
+      "original_log": "bt-tests-numeric-boundaries.log",
+      "log_sha256": "51750efd2fcf26b5f567187c450e91cea554898ec33cbff522b8efa23370666b",
+      "outcomes": [
+        "809 passed in 21.92s"
+      ]
+    },
+    {
+      "command": "uv run --no-sync python -m pytest",
+      "exit_code": 1,
+      "seconds": 45.11,
+      "check": "tests-pandas-compatibility",
+      "original_log": "bt-tests-pandas-compatibility.log",
+      "log_sha256": "e71ef5cefbe0c97bf88732bc605345b35ba4c27c19e13249ac850c434a11ff60",
+      "outcomes": [
+        "3 failed, 806 passed in 42.12s"
+      ]
+    },
+    {
+      "command": "uv run --no-sync python -m pytest",
+      "exit_code": 0,
+      "seconds": 41.82,
+      "check": "tests-python315-source-supported",
+      "original_log": "bt-tests-python315-source-supported.log",
+      "log_sha256": "9753e08c70d7724d1776a17f61bb9e6b36d79473f80de7e8e30cad07b0e7c077",
+      "outcomes": [
+        "809 passed in 38.62s"
+      ]
+    },
+    {
+      "command": "uv run --no-sync python -c import sys,importlib.metadata,json; print(sys.version); print(json.dumps({d.metadata[\"Name\"]:d.version for d in importlib.metadata.distributions()},indent=2,sort_keys=True))",
+      "exit_code": 0,
+      "seconds": 0.25,
+      "check": "versions-final",
+      "original_log": "bt-versions-final.log",
+      "log_sha256": "58171e6500e831df77d6da4537e34fa1a978421268b5f14d5f4169e9b05cf62f",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.14 --no-build --no-install-project",
+      "exit_code": 0,
+      "seconds": 0.75,
+      "check": "wheel-probe-3.14",
+      "original_log": "bt-wheel-probe-3.14.log",
+      "log_sha256": "2ace1fcae2856847e0ee5f256101e3d4e873379e3c21fced7182fc55051b898f",
+      "outcomes": []
+    },
+    {
+      "command": "uv sync --all-extras --all-groups --python 3.15 --no-build --no-install-project",
+      "exit_code": 2,
+      "seconds": 5.59,
+      "check": "wheel-probe-3.15",
+      "original_log": "bt-wheel-probe-3.15.log",
+      "log_sha256": "320216665dbf4a8354734452c68613e79bd5f87887a92545b2096bb6966bdd9d",
+      "outcomes": []
+    }
+  ],
+  "summary": {
+    "repo": "bt",
+    "branch": "feature/ayu_develop",
+    "blockers": [],
+    "started": "2026-10-12T00:26:51+0800",
+    "dependency_updates": [],
+    "lock": "passed",
+    "python": "3.15",
+    "sync": "passed",
+    "build": "passed",
+    "compile": "passed",
+    "tests": "passed",
+    "test_summary": "$ uv run --no-sync python -m pytest\n........................................................................ [  8%]\n........................................................................ [ 17%]\n........................................................................ [ 26%]\n........................................................................ [ 35%]\n........................................................................ [ 44%]\n........................................................................ [ 53%]\n........................................................................ [ 62%]\n........................................................................ [ 71%]\n........................................................................ [ 80%]\n........................................................................ [ 88%]\n........................................................................ [ 97%]\n.................                                                        [100%]\n809 passed in 38.62s\n",
+    "finished": "2026-10-12T00:28:01+0800",
+    "head": "aaec640c90a73e7784abeda07eb51533b491c791",
+    "notes": [
+      "The current Cython wheel hook discovers src/bt via setuptools package-dir. Pandas column initialization uses loc to avoid copy-on-write chained-assignment warnings.",
+      "Empty/all-NaN benchmark histogram data is explicitly rejected with ValueError before density normalization; the existing cases preserve that behavior.",
+      "Verified licensed ffn 1.4.1 source handles total-loss log returns as -inf and undefined below-total-loss values as NaN without warning filters. See vendor/ffn/PROVENANCE.md.",
+      "mdformat is capped below0.8 because current mdformat-tables 1.0.0 requires that API family. Python 3.15 actual source installation succeeds."
+    ],
+    "python_version": "3.15.0 (main, Oct  9 2026, 15:11:47) [Clang 22.1.3 ]",
+    "failed_attempts": [
+      {
+        "python": "3.15",
+        "stage": "native wheel probe",
+        "details": "$ uv sync --all-extras --all-groups --python 3.15 --no-build --no-install-project\nUsing CPython 3.15.0\nRemoved virtual environment at: .venv\nCreating virtual environment at: .venv\nResolved 184 packages in 11ms\nerror: Distribution `pyyaml==6.0.3 @ registry+https://pypi.org/simple` can't be installed because it is marked as `--no-build` but has no binary distribution\n"
+      },
+      {
+        "stage": "tests",
+        "details": "th uses bincount, but that only works for certain types\n        # of weight\n        simple_weights = (\n            weights is None or\n            np.can_cast(weights.dtype, np.double) or\n            np.can_cast(weights.dtype, complex)\n        )\n    \n        if uniform_bins is not None and simple_weights:\n            # Fast algorithm for equal bins\n            # We now convert values of a to bin indices, under the assumption of\n            # equal bin widths (which is valid here).\n            first_edge, last_edge, n_equal_bins = uniform_bins\n    \n            # Initialize empty histogram\n            n = np.zeros(n_equal_bins, ntype)\n    \n            # Pre-compute histogram scaling factor\n            norm_numerator = n_equal_bins\n            norm_denom = _unsigned_subtract(last_edge, first_edge)\n    \n            # We iterate over blocks here for two reasons: the first is that for\n            # large arrays, it is actually faster (for example for a 10^8 array it\n            # is 2x as fast) and it results in a memory footprint 3x lower in the\n            # limit of large arrays.\n            for i in _range(0, len(a), BLOCK):\n                tmp_a = a[i:i + BLOCK]\n                if weights is None:\n                    tmp_w = None\n                else:\n                    tmp_w = weights[i:i + BLOCK]\n    \n                # Only include values in the right range\n                keep = (tmp_a >= first_edge)\n                keep &= (tmp_a <= last_edge)\n                if not np.logical_and.reduce(keep):\n                    tmp_a = tmp_a[keep]\n                    if tmp_w is not None:\n                        tmp_w = tmp_w[keep]\n    \n                # This cast ensures no type promotions occur below, which gh-10322\n                # make unpredictable. Getting it wrong leads to precision errors\n                # like gh-8123.\n                tmp_a = tmp_a.astype(bin_edges.dtype, copy=False)\n    \n                # Compute the bin indices, and for values that lie exactly on\n                # last_edge we need to subtract one\n                f_indices = ((_unsigned_subtract(tmp_a, first_edge) / norm_denom)\n                             * norm_numerator)\n                indices = f_indices.astype(np.intp)\n                indices[indices == n_equal_bins] -= 1\n    \n                # The index computation is not guaranteed to give exactly\n                # consistent results within ~1 ULP of the bin edges.\n                decrement = tmp_a < bin_edges[indices]\n                indices[decrement] -= 1\n                # The last bin includes the right edge. The other bins do not.\n                increment = ((tmp_a >= bin_edges[indices + 1])\n                             & (indices != n_equal_bins - 1))\n                indices[increment] += 1\n    \n                # We now compute the histogram using bincount\n                if ntype.kind == 'c':\n                    n.real += np.bincount(indices, weights=tmp_w.real,\n                                          minlength=n_equal_bins)\n                    n.imag += np.bincount(indices, weights=tmp_w.imag,\n                                          minlength=n_equal_bins)\n                else:\n                    n += np.bincount(indices, weights=tmp_w,\n                                     minlength=n_equal_bins).astype(ntype)\n        else:\n            # Compute via cumulative histogram\n            cum_n = np.zeros(bin_edges.shape, ntype)\n            if weights is None:\n                for i in _range(0, len(a), BLOCK):\n                    sa = np.sort(a[i:i + BLOCK])\n                    cum_n += _search_sorted_inclusive(sa, bin_edges)\n            else:\n                zero = np.zeros(1, dtype=ntype)\n                for i in _range(0, len(a), BLOCK):\n                    tmp_a = a[i:i + BLOCK]\n                    tmp_w = weights[i:i + BLOCK]\n                    sorting_index = np.argsort(tmp_a)\n                    sa = tmp_a[sorting_index]\n                    sw = tmp_w[sorting_index]\n                    cw = np.concatenate((zero, sw.cumsum()))\n                    bin_index = _search_sorted_inclusive(sa, bin_edges)\n                    cum_n += cw[bin_index]\n    \n            n = np.diff(cum_n)\n    \n        if density:\n            db = np.array(np.diff(bin_edges), float)\n>           return n / db / n.sum(), bin_edges\n                   ^^^^^^^^^^^^^^^^\nE           RuntimeWarning: invalid value encountered in divide\n\n.venv/lib/python3.14/site-packages/numpy/lib/_histograms_impl.py:897: RuntimeWarning\n=========================== short test summary info ============================\nFAILED tests/test_backtest.py::test_herfindahl_index_preserves_exposure_at_zero_nav[False]\nFAILED tests/test_backtest.py::test_herfindahl_index_preserves_exposure_at_zero_nav[True]\nFAILED tests/test_backtest.py::test_random_benchmark_histogram_preserves_empty_sample_error[samples0]\nFAILED tests/test_backtest.py::test_random_benchmark_histogram_preserves_empty_sample_error[samples1]\n4 failed, 805 passed in 16.38s\n"
+      },
+      {
+        "stage": "tests",
+        "details": " know that we have\n            #   aligned blocks / dtypes.\n    \n            # e.g. my_ufunc, modf, logaddexp, heaviside, subtract, add\n            inputs = tuple(np.asarray(x) for x in inputs)\n            # Note: we can't use default_array_ufunc here bc reindexing means\n            #  that `self` may not be among `inputs`\n            result = getattr(ufunc, method)(*inputs, **kwargs)\n        elif self.ndim == 1:\n            # ufunc(series, ...)\n            inputs = tuple(extract_array(x, extract_numpy=True) for x in inputs)\n>           result = getattr(ufunc, method)(*inputs, **kwargs)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           RuntimeWarning: divide by zero encountered in log1p\n\n.venv/lib/python3.14/site-packages/pandas/core/arraylike.py:402: RuntimeWarning\n____ test_random_benchmark_histogram_preserves_empty_sample_error[samples1] ____\n\nsamples = [nan, nan]\n\n    @pytest.mark.parametrize(\"samples\", [[], [np.nan, np.nan]])\n    def test_random_benchmark_histogram_preserves_empty_sample_error(samples):\n        from matplotlib import pyplot as plt\n    \n        # Render without depending on a GUI toolkit being available on CI runners.\n        plt.switch_backend(\"Agg\")\n    \n        result = bt.backtest.RandomBenchmarkResult.__new__(bt.backtest.RandomBenchmarkResult)\n        result.r_stats = pd.DataFrame([samples], index=[\"total_return\"], dtype=float)\n        result.b_stats = pd.Series({\"total_return\": 0.15})\n        try:\n            # No observations is distinct from a constant sample; retain pandas' rejection.\n            with pytest.raises(ValueError):\n>               result.plot_histogram(\"total_return\")\n\ntests/test_backtest.py:528: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nsrc/bt/backtest.py:802: in plot_histogram\n    ser.plot(kind=\"kde\")\n.venv/lib/python3.14/site-packages/pandas/plotting/_core.py:1185: in __call__\n    return plot_backend.plot(data, kind=kind, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n.venv/lib/python3.14/site-packages/pandas/plotting/_matplotlib/__init__.py:71: in plot\n    plot_obj.generate()\n.venv/lib/python3.14/site-packages/pandas/plotting/_matplotlib/core.py:520: in generate\n    self._make_plot(fig)\n.venv/lib/python3.14/site-packages/pandas/plotting/_matplotlib/hist.py:155: in _make_plot\n    self._make_plot_keywords(kwds, y)\n.venv/lib/python3.14/site-packages/pandas/plotting/_matplotlib/hist.py:288: in _make_plot_keywords\n    kwds[\"ind\"] = type(self)._get_ind(y, ind=self.ind)\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n.venv/lib/python3.14/site-packages/pandas/plotting/_matplotlib/hist.py:246: in _get_ind\n    sample_range = np.nanmax(y) - np.nanmin(y)\n                   ^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\na = array([nan, nan]), axis = None, out = None, keepdims = <no value>\ninitial = <no value>, where = <no value>\n\n    @array_function_dispatch(_nanmax_dispatcher)\n    def nanmax(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,\n               where=np._NoValue):\n        \"\"\"\n        Return the maximum of an array or maximum along an axis, ignoring any\n        NaNs.  When all-NaN slices are encountered a ``RuntimeWarning`` is\n        raised and NaN is returned for that slice.\n    \n        Parameters\n        ----------\n        a : array_like\n            Array containing numbers whose maximum is desired. If `a` is not an\n            array, a conversion is attempted.\n        axis : {int, tuple of int, None}, optional\n            Axis or axes along which the maximum is computed. The default is to compute\n            the maximum of the flattened array.\n        out : ndarray, optional\n            Alternate output array in which to place the result.  The default\n            is ``None``; if provided, it must have the same shape as the\n            expected output, but the type will be cast if necessary. See\n            :ref:`ufuncs-output-type` for more details.\n        keepdims : bool, optional\n            If this is set to True, the axes which are reduced are left\n            in the result as dimensions with size one. With this option,\n            the result will broadcast correctly against the original `a`.\n            If the value is anything but the default, then\n            `keepdims` will be passed through to the `max` method\n            of sub-classes of `ndarray`.  If the sub-classes methods\n            does not implement `keepdims` any exceptions will be raised.\n        initial : scalar, optional\n            The minimum value of an output element. Must be present to allow\n            computation on empty slice. See `~numpy.ufunc.reduce` for details.\n    \n            .. versionadded:: 1.22.0\n        where : array_like of bool, optional\n            Elements to compare for the maximum. See `~numpy.ufunc.reduce`\n            for details.\n    \n            .. versionadded:: 1.22.0\n    \n        Returns\n        -------\n        nanmax : ndarray\n            An array with the same shape as `a`, with the specified axis removed.\n            If `a` is a 0-d array, or if axis is None, an ndarray scalar is\n            returned.  The same dtype as `a` is returned.\n    \n        See Also\n        --------\n        nanmin :\n            The minimum value of an array along a given axis, ignoring any NaNs.\n        amax :\n            The maximum value of an array along a given axis, propagating any NaNs.\n        fmax :\n            Element-wise maximum of two arrays, ignoring any NaNs.\n        maximum :\n            Element-wise maximum of two arrays, propagating any NaNs.\n        isnan :\n            Shows which elements are Not a Number (NaN).\n        isfinite:\n            Shows which elements are neither NaN nor infinity.\n    \n        amin, fmin, minimum\n    \n        Notes\n        -----\n        NumPy uses the IEEE Standard for Binary Floating-Point for Arithmetic\n        (IEEE 754). This means that Not a Number is not equivalent to infinity.\n        Positive infinity is treated as a very large number and negative\n        infinity is treated as a very small (i.e. negative) number.\n    \n        If the input has a integer type the function is equivalent to np.max.\n    \n        Examples\n        --------\n        >>> import numpy as np\n        >>> a = np.array([[1, 2], [3, np.nan]])\n        >>> np.nanmax(a)\n        3.0\n        >>> np.nanmax(a, axis=0)\n        array([3.,  2.])\n        >>> np.nanmax(a, axis=1)\n        array([2.,  3.])\n    \n        When positive infinity and negative infinity are present:\n    \n        >>> np.nanmax([1, 2, np.nan, -np.inf])\n        2.0\n        >>> np.nanmax([1, 2, np.nan, np.inf])\n        inf\n    \n        \"\"\"\n        kwargs = {}\n        if keepdims is not np._NoValue:\n            kwargs['keepdims'] = keepdims\n        if initial is not np._NoValue:\n            kwargs['initial'] = initial\n        if where is not np._NoValue:\n            kwargs['where'] = where\n    \n        if (type(a) is np.ndarray or type(a) is np.memmap) and a.dtype != np.object_:\n            # Fast, but not safe for subclasses of ndarray, or object arrays,\n            # which do not implement isnan (gh-9009), or fmax correctly (gh-8975)\n            res = np.fmax.reduce(a, axis=axis, out=out, **kwargs)\n            if np.isnan(res).any():\n>               warnings.warn(\"All-NaN slice encountered\", RuntimeWarning,\n                              stacklevel=2)\nE               RuntimeWarning: All-NaN slice encountered\n\n.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:487: RuntimeWarning\n=========================== short test summary info ============================\nFAILED tests/test_backtest.py::test_herfindahl_index_preserves_exposure_at_zero_nav[False]\nFAILED tests/test_backtest.py::test_herfindahl_index_preserves_exposure_at_zero_nav[True]\nFAILED tests/test_backtest.py::test_random_benchmark_histogram_preserves_empty_sample_error[samples1]\n3 failed, 806 passed in 42.12s\n",
+        "label": "tests-pandas-compatibility"
+      }
+    ],
+    "unresolved_blockers": [],
+    "default_ancestry": {
+      "refs/remotes/origin/master": true
+    },
+    "merge_in_progress": false,
+    "artifact_files": [
+      "dist/bt-1.4.1-cp314-cp314-macosx_27_0_arm64.whl",
+      "dist/bt-1.4.1-cp315-cp315-macosx_27_0_arm64.whl",
+      "dist/bt-1.4.1.tar.gz",
+      "dist/.gitignore"
+    ],
+    "committed": true,
+    "pushed": false,
+    "worktree_status": ""
+  },
+  "note": "Full raw logs are retained in the workspace maintenance evidence, not distributed here. Hashes identify those original logs. A successful build or selected test subset does not imply a full test-suite pass. Commands containing <workspace> describe the original execution environment."
+}
