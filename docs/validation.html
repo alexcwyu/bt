@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Validation evidence: bt</title><style>
+:root{color-scheme:light dark;--bg:#f6f8fa;--paper:#fff;--fg:#182332;--muted:#526274;--line:#d9e0e7;--accent:#1769aa}
+@media(prefers-color-scheme:dark){:root{--bg:#111820;--paper:#192330;--fg:#e6edf3;--muted:#a0b3c5;--line:#344354;--accent:#71b7ee}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,sans-serif}
+header{border-bottom:1px solid var(--line);padding:16px max(24px,calc((100vw - 1120px)/2));background:var(--paper);font-size:14px}
+main{max-width:1120px;margin:32px auto;padding:40px 48px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
+h1,h2,h3,h4{line-height:1.3;scroll-margin-top:24px}h1{font-size:2.1rem}h2{margin-top:2.5em;border-bottom:1px solid var(--line);padding-bottom:.35em}h3{margin-top:1.8em}
+a{color:var(--accent);text-underline-offset:3px}code{font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border-radius:4px;padding:2px 5px}pre{overflow:auto;border:1px solid var(--line);background:var(--bg);padding:16px;border-radius:7px}pre code{padding:0;background:none}
+table{border-collapse:collapse;width:100%;display:block;overflow-x:auto;font-size:14px}th,td{border:1px solid var(--line);padding:9px 12px;text-align:left}th{background:var(--bg)}blockquote{border-left:4px solid var(--accent);margin:16px 0;padding:4px 20px;color:var(--muted)}
+.diagram{overflow-x:auto;margin:24px 0;padding:20px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#182332}.mermaid{border:0;background:none;text-align:center}.mermaid svg{height:auto;max-width:100%}details{font-size:13px;color:#526274}.headerlink{margin-left:.4em;font-size:.7em;text-decoration:none;color:var(--muted)}
+@media(max-width:740px){main{margin:0;padding:24px 18px;border:0;border-radius:0}h1{font-size:1.7rem}.diagram{padding:8px}}
+@media print{header,details,.headerlink{display:none}body,main{background:#fff;color:#000;border:0;margin:0;padding:0}a{color:#000}.diagram,pre{break-inside:avoid}}
+</style></head><body><header>Engineering documentation · <a href="validation.md">Markdown source</a></header><main><h1 id="validation-evidence-bt">Validation evidence: bt<a class="headerlink" href="#validation-evidence-bt" title="Permanent link">&para;</a></h1>
+<p>Run date: 2026-10-12. Branch: <code>feature/ayu_develop</code>. Interpreter: <code>3.15.0 (main, Oct  9 2026, 15:11:47) [Clang 22.1.3 ]</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>lock</td>
+<td>passed</td>
+</tr>
+<tr>
+<td>sync</td>
+<td>passed</td>
+</tr>
+<tr>
+<td>compile</td>
+<td>passed</td>
+</tr>
+<tr>
+<td>build</td>
+<td>passed</td>
+</tr>
+<tr>
+<td>tests</td>
+<td>passed</td>
+</tr>
+</tbody>
+</table>
+<h2 id="current-result-and-compatibility-decisions">Current result and compatibility decisions<a class="headerlink" href="#current-result-and-compatibility-decisions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The current Cython wheel hook discovers src/bt via setuptools package-dir. Pandas column initialization uses loc to avoid copy-on-write chained-assignment warnings.</li>
+<li>Empty/all-NaN benchmark histogram data is explicitly rejected with ValueError before density normalization; the existing cases preserve that behavior.</li>
+<li>Verified licensed ffn 1.4.1 source handles total-loss log returns as -inf and undefined below-total-loss values as NaN without warning filters. See vendor/ffn/PROVENANCE.md.</li>
+<li>mdformat is capped below0.8 because current mdformat-tables 1.0.0 requires that API family. Python 3.15 actual source installation succeeds.</li>
+</ul>
+<p>Current unresolved checks:</p>
+<p>All supplied checks recorded below passed.</p>
+<h2 id="latest-full-suite-output">Latest full-suite output<a class="headerlink" href="#latest-full-suite-output" title="Permanent link">&para;</a></h2>
+<pre><code class="language-text">$ uv run --no-sync python -m pytest
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 35%]
+........................................................................ [ 44%]
+........................................................................ [ 53%]
+........................................................................ [ 62%]
+........................................................................ [ 71%]
+........................................................................ [ 80%]
+........................................................................ [ 88%]
+........................................................................ [ 97%]
+.................                                                        [100%]
+809 passed in 38.62s
+
+</code></pre>
+<h2 id="exact-commands-and-exit-codes">Exact commands and exit codes<a class="headerlink" href="#exact-commands-and-exit-codes" title="Permanent link">&para;</a></h2>
+<p>Unsuccessful rows are retained as historical compatibility attempts; they are not claims that a current passing check remains blocked. Source-build probes use isolated temporary copies to preserve the selected repository environment.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th style="text-align: right;">Exit</th>
+<th style="text-align: right;">Seconds</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uv lock --upgrade --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.56</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-lock-3.15.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.15 --no-build --no-install-project</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">5.59</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-wheel-probe-3.15.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv lock --upgrade --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.88</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-lock-3.14.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.14 --no-build --no-install-project</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.75</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-wheel-probe-3.14.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">26.35</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-sync-3.14.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv build --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">14.68</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-build.log">log</a></td>
+</tr>
+<tr>
+<td><code>/Users/alex/.local/share/uv/python/cpython-3.14-macos-aarch64-none/bin/python3.14 -m compileall -q src</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.08</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-compile.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m pytest</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">18.26</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-tests.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.13</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-sync-pandas-compatibility.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m pytest</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">45.11</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-tests-pandas-compatibility.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m pytest</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">23.55</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-tests-numeric-boundaries.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv lock --upgrade --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.4</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-lock-ffn-numeric-boundary.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">16.53</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-sync-ffn-numeric-boundary.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m pytest</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">16.13</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-tests-ffn-numeric-boundary.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m compileall -q src</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.07</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-compile-final.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv build --python 3.14</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">10.67</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-build-final.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -c import sys,importlib.metadata,json; print(sys.version); print(json.dumps({d.metadata["Name"]: d.version for d in importlib.metadata.distributions()},indent=2,sort_keys=True))</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.24</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-versions-final.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --directory /tmp/trading-python315-probes/bt --all-extras --all-groups --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">48.14</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-python315-source-probe.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv lock --upgrade --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.98</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-lock-python315-source-supported.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv sync --all-extras --all-groups --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">41.24</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-sync-python315-source-supported.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m pytest</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">41.82</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-tests-python315-source-supported.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -m compileall -q src</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.14</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-compile-selected-python.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv build --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">30.19</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-build-selected-python.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -c import sys,importlib.metadata,json; print(sys.version); print(json.dumps({d.metadata["Name"]:d.version for d in importlib.metadata.distributions()},indent=2,sort_keys=True))</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.25</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-versions-final.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv build --python 3.15</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">21.95</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-build-vendor-source-archive.log">log</a></td>
+</tr>
+<tr>
+<td><code>uv run --no-sync python -c import bt,bt.core; print(bt.__file__); print(bt.core.__file__)</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">4.65</td>
+<td><a href="../../docs/maintenance-2026-10-12/bt-artifact-import.log">log</a></td>
+</tr>
+</tbody>
+</table>
+<p>The versions-final log records the exact interpreter patch release and every installed dependency version. The machine-readable <a href="../../docs/maintenance-2026-10-12/bt-result.json">result</a> includes branch/default ancestry, status, artifacts and unresolved checks.</p>
+<h2 id="dependency-floor-refresh">Dependency floor refresh<a class="headerlink" href="#dependency-floor-refresh" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The table records the initial metadata refresh. Later compatibility constraints and vendor sources are explained above and the final authoritative requirements are in <a href="../pyproject.toml">pyproject.toml</a> and <a href="../uv.lock">uv.lock</a>. No test cases were added, removed or disabled. Existing deprecated-API cases retain their assertions while explicitly checking the documented warning.</p></main>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.esm.min.mjs';
+mermaid.initialize({startOnLoad:true,securityLevel:'strict',theme:'default',flowchart:{useMaxWidth:true},sequence:{useMaxWidth:true}});
+</script></body></html>

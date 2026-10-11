@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling>=1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ffn"
+version = "1.4.1+ayu1"
+requires-python = ">=3.13"
+license-files = ["LICENSE"]
+dependencies = ["decorator>=5.0.7", "matplotlib>=1", "numpy", "pandas>=0.19", "scikit-learn>=0.15", "scipy>=0.15", "tabulate>=0.7.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ffn"]

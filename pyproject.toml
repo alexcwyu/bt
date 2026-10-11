@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-cython", "Cython>=3.2.1", "setuptools"]
+requires = ["hatchling>=1.32.4", "hatch-cython>=0.6.0", "Cython>=3.3.0", "setuptools>=84.0.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -35,41 +35,41 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "cython>=3.2.1",
-    "ffn>=1.1.2",
-    "pyprind>=2.11",
-    "tqdm>=4",
+    "cython>=3.3.0",
+    "ffn>=1.4.1",
+    "pyprind>=2.11.3",
+    "tqdm>=4.70.1",
 ]
 
 [project.optional-dependencies]
 develop = [
-    "build",
-    "bump-my-version",
-    "check-dist",
-    "cibuildwheel",
-    "codespell",
-    "cython>=0.29.25",
-    "ffn>=1.1.2",
-    "hatchling",
-    "hatch-cython",
-    "klink>=0.1.13",
-    "matplotlib>=2",
-    "mdformat",
-    "mdformat-myst",
-    "mdformat-tables>=1",
-    "numpy>=1",
-    "pandas>=0.19",
-    "pyprind>=2.11",
-    "pytest",
-    "pytest-benchmark",
-    "pytest-cov",
-    "ruff",
-    "setuptools",
-    "twine>=6.1",
-    "ty",
-    "uv",
-    "wheel",
-    "yardang>=0.10.0",
+    "build>=1.6.1",
+    "bump-my-version>=1.6.0",
+    "check-dist>=0.1.5",
+    "cibuildwheel>=4.3.1",
+    "codespell>=2.4.3",
+    "cython>=3.3.0",
+    "ffn>=1.4.1",
+    "hatchling>=1.32.4",
+    "hatch-cython>=0.6.0",
+    "klink>=0.1.14",
+    "matplotlib>=3.11.2",
+    "mdformat>=0.7.22,<0.8",
+    "mdformat-myst>=0.3.0",
+    "mdformat-tables>=1.0.0",
+    "numpy>=2.5.4",
+    "pandas>=3.0.6",
+    "pyprind>=2.11.3",
+    "pytest>=9.1.1",
+    "pytest-benchmark>=5.3.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+    "setuptools>=84.0.0",
+    "twine>=7.0.0",
+    "ty>=0.0.86",
+    "uv>=0.13.0",
+    "wheel>=0.48.0",
+    "yardang>=0.10.3",
 ]
 dev = ["bt[develop]"]
 
@@ -113,6 +113,9 @@ fail_under = 50
 [tool.hatch.build.targets.sdist]
 include = [
     "/src/bt",
+    "/vendor",
+    "/uv.lock",
+    "/.python-version",
     "/LICENSE",
     "/README.md",
     "/pyproject.toml",
@@ -139,6 +142,7 @@ exclude = [
 
 [tool.setuptools]
 packages = ["bt"]
+package-dir = {"" = "src"}
 
 [tool.check-dist]
 present = ["bt/__init__.py", "bt/algos.py", "bt/backtest.py", "bt/core.py"]
@@ -226,11 +230,14 @@ examples-nb = "docs/source/examples-nb.html"
 
 [dependency-groups]
 dev = [
-    "matplotlib>=3.10.7",
-    "numpy>=2.3.4",
-    "pandas>=2.3.3",
-    "pytest>=9.0.1",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.14.5",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pandas>=3.0.6",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
 ]
 
+
+[tool.uv.sources]
+ffn = {path = "vendor/ffn"}

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Current uv development workflow</title><style>
+:root{color-scheme:light dark;--bg:#f6f8fa;--paper:#fff;--fg:#182332;--muted:#526274;--line:#d9e0e7;--accent:#1769aa}
+@media(prefers-color-scheme:dark){:root{--bg:#111820;--paper:#192330;--fg:#e6edf3;--muted:#a0b3c5;--line:#344354;--accent:#71b7ee}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,sans-serif}
+header{border-bottom:1px solid var(--line);padding:16px max(24px,calc((100vw - 1120px)/2));background:var(--paper);font-size:14px}
+main{max-width:1120px;margin:32px auto;padding:40px 48px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
+h1,h2,h3,h4{line-height:1.3;scroll-margin-top:24px}h1{font-size:2.1rem}h2{margin-top:2.5em;border-bottom:1px solid var(--line);padding-bottom:.35em}h3{margin-top:1.8em}
+a{color:var(--accent);text-underline-offset:3px}code{font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border-radius:4px;padding:2px 5px}pre{overflow:auto;border:1px solid var(--line);background:var(--bg);padding:16px;border-radius:7px}pre code{padding:0;background:none}
+table{border-collapse:collapse;width:100%;display:block;overflow-x:auto;font-size:14px}th,td{border:1px solid var(--line);padding:9px 12px;text-align:left}th{background:var(--bg)}blockquote{border-left:4px solid var(--accent);margin:16px 0;padding:4px 20px;color:var(--muted)}
+.diagram{overflow-x:auto;margin:24px 0;padding:20px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#182332}.mermaid{border:0;background:none;text-align:center}.mermaid svg{height:auto;max-width:100%}details{font-size:13px;color:#526274}.headerlink{margin-left:.4em;font-size:.7em;text-decoration:none;color:var(--muted)}
+@media(max-width:740px){main{margin:0;padding:24px 18px;border:0;border-radius:0}h1{font-size:1.7rem}.diagram{padding:8px}}
+@media print{header,details,.headerlink{display:none}body,main{background:#fff;color:#000;border:0;margin:0;padding:0}a{color:#000}.diagram,pre{break-inside:avoid}}
+</style></head><body><header>Engineering documentation · <a href="development.md">Markdown source</a></header><main><!-- ayu-maintenance-2026-10-12 -->
+<h1 id="current-uv-development-workflow">Current uv development workflow<a class="headerlink" href="#current-uv-development-workflow" title="Permanent link">&para;</a></h1>
+<p>The maintained branch is <code>feature/ayu_develop</code>. The selected interpreter is Python <code>3.15</code>; <code>requires-python</code> records the range that was actually resolved. Python 3.15 was attempted first. Dependency/native-wheel failures and fallback evidence are recorded in <a href="validation.md">validation.md</a>.</p>
+<pre><code class="language-sh">export UV_PYTHON_PREFERENCE=only-managed
+uv python install 3.15
+uv lock --check
+uv sync --frozen --all-extras --all-groups
+uv run --no-sync python -m compileall -q src
+uv build
+uv run --no-sync python -m pytest
+</code></pre>
+<p>Use <code>uv lock --upgrade</code> when intentionally refreshing dependencies, then review <code>pyproject.toml</code>, <code>uv.lock</code>, and the existing full test suite. The dependency floors were refreshed from current PyPI release metadata while preserving meaningful upstream upper bounds. Compatibility exceptions are documented with their resolver/test evidence rather than hidden by disabling tests.</p>
+<p>The <code>src/</code> layout and build-backend package discovery preserve public import names. Wheel/sdist resources include the source-associated data and templates. Optional vendor SDKs, live credentials, databases and graphical/native libraries retain their original runtime requirements. Examples and test fixtures are not promoted into the library API.</p>
+<!-- prior-development-notes -->
+
+<h2 id="compatibility-decisions">Compatibility decisions<a class="headerlink" href="#compatibility-decisions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The current Cython wheel hook discovers src/bt via setuptools package-dir. Pandas column initialization uses loc to avoid copy-on-write chained-assignment warnings.</li>
+<li>Empty/all-NaN benchmark histogram data is explicitly rejected with ValueError before density normalization; the existing cases preserve that behavior.</li>
+<li>Verified licensed ffn 1.4.1 source handles total-loss log returns as -inf and undefined below-total-loss values as NaN without warning filters. See vendor/ffn/PROVENANCE.md.</li>
+<li>
+<p>mdformat is capped below0.8 because current mdformat-tables 1.0.0 requires that API family. Python 3.15 actual source installation succeeds.</p>
+</li>
+<li>
+<p><a href="../vendor/ffn/PROVENANCE.md">Verified dependency source and license: ffn</a></p>
+</li>
+</ul>
+<h1 id="develop-bt">Develop bt<a class="headerlink" href="#develop-bt" title="Permanent link">&para;</a></h1>
+<p>Use Python 3.11 for the development and documentation tools. bt's runtime still supports Python 3.9 and later. Install <a href="https://docs.astral.sh/uv/">uv</a> and a C compiler for the Cython extension, then create an environment:</p>
+<pre><code class="language-bash">uv venv --python 3.11
+source .venv/bin/activate
+make develop
+make lint
+make checks
+make coverage
+make build
+</code></pre>
+<p>On Windows, activate with <code>.venv\Scripts\activate</code> instead. Run <code>make help</code> for available targets. <code>make test</code> runs tests without coverage; <code>make benchmark</code> runs the separate backtest benchmarks. Type checking (<code>make check-types</code>) is advisory and not a CI gate.</p>
+<p>Coverage measures the Python modules. The compiled <code>bt.core</code> extension is still tested, but excluded from coverage because it is built without Cython line tracing.</p>
+<h2 id="build-the-documentation">Build the documentation<a class="headerlink" href="#build-the-documentation" title="Permanent link">&para;</a></h2>
+<pre><code class="language-bash">make develop
+make docs
+make serve
+</code></pre>
+<p>Open <a href="http://localhost:9087">http://localhost:9087</a>. Yardang reads <code>[tool.yardang]</code> in <code>pyproject.toml</code>, generates the homepage from <code>README.md</code>, and uses the repository root as the Sphinx source directory. Output goes into <code>docs/html</code>, using the installed Klink theme. The old Sphinx Makefiles, hand-maintained <code>conf.py</code>, vendored theme, and manual <code>make pages</code> deployment are no longer used.</p>
+<p>Documentation dependencies live in <code>pyproject.toml</code> under the <code>develop</code> extra, alongside the other development tools. Both local setup and documentation CI install that extra, including <code>klink&gt;=0.1.13</code> for the sidebar and footnote fixes. There is no separate documentation requirements file.</p>
+<p><code>make docs</code> runs <code>yardang build --warning-is-error</code>, then copies <code>docs/source/_static</code> into the built site's <code>_static</code> directory. ffn cross-references are configured in <code>[tool.yardang.intersphinx-mapping]</code>; Yardang 0.10.0 or later supports this setting. No custom Python build wrapper is needed.</p>
+<p>Edit the landing page in <code>README.md</code>, guides in <code>docs/source/*.md</code>, and API reference in <code>docs/source/overview.md</code>. Keep tutorials, task guides, and API reference distinct. Autodoc directives remain inside MyST <code>eval-rst</code> fences so existing RST docstrings and API anchors render correctly, as described in the <a href="https://myst-parser.readthedocs.io/en/stable/faq/index.html#use-sphinx-ext-autodoc-in-markdown-files">MyST autodoc guide</a>.</p>
+<p>Notebook examples use checked-in Markdown exports and images; documentation builds do not execute notebooks or fetch market data. After editing notebooks, regenerate the exports from their saved outputs:</p>
+<pre><code class="language-bash">uv pip install nbconvert
+cd docs/source
+jupyter nbconvert --to markdown --template-file=../notebook.md.j2 --NbConvertApp.output_files_dir=_static *.ipynb
+python -m mdformat *.md
+</code></pre>
+<p>The export template preserves image paths, retina dimensions, and Klink CSS classes. Pandoc is not required. Review and commit the changed notebooks, exports, and images together.</p>
+<p>Pull requests build documentation and upload an HTML artifact. Successful pushes to <code>master</code> also publish to the existing <code>gh-pages</code> branch. Local builds never publish.</p>
+<p>Run <code>make docs</code> after documentation changes and check navigation, images, API links, and heading links in a browser. Preserve page basenames where possible; maintain <code>[tool.yardang.redirects]</code> when paths change. The redirects preserve legacy page URLs, including <code>bt.html</code>, and forward their fragments; renamed headings need explicit compatibility anchors. <code>docs/source/examples.md</code> includes the individual Markdown examples, which also retain their standalone URLs.</p>
+<h2 id="update-the-copier-template">Update the Copier template<a class="headerlink" href="#update-the-copier-template" title="Permanent link">&para;</a></h2>
+<p><code>.copier-answers.yaml</code> records the Cython variant of <a href="https://github.com/python-project-templates/base">python-project-templates/base</a> and the exact template revision. From a clean branch, update with:</p>
+<pre><code class="language-bash">copier update --answers-file .copier-answers.yaml --trust
+</code></pre>
+<p>Review the resulting diff and resolve conflicts before running the checks above. The Python Templates Copier Update GitHub App can propose updates automatically; installing that app is separate from this repository change.</p>
+<p>bt intentionally retains its MIT license, runtime Python floor, package metadata and version, Cython build hook, native wheel matrix, top-level <code>tests</code> directory, benchmarks, and Ruff line length. Documentation adopts the template's Markdown homepage while retaining Klink styling and redirecting legacy page URLs. The docs workflow builds from source because bt's CI produces platform-specific wheel artifacts.</p>
+<p>The Cython template supplies shared Python/compiler setup, native-wheel CI, and distribution smoke tests. CI builds wheels from clean sdists instead of deleting compiled files from the checkout. CI uses the template's <code>actions-ext/python/test-wheel</code> and <code>actions-ext/python/test-sdist</code> actions for installation smoke tests. bt retains its full source-tree test suite; cibuildwheel verifies that each installed wheel imports the compiled <code>bt.core</code> extension.</p>
+<p>The build workflow follows the template's Python 3.11–3.14 matrix on Linux x86_64/ARM64, macOS ARM64, and Windows x86_64. The separate release workflow retains its existing Python versions and macOS architecture selection. The runtime minimum remains unchanged.</p></main>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.esm.min.mjs';
+mermaid.initialize({startOnLoad:true,securityLevel:'strict',theme:'default',flowchart:{useMaxWidth:true},sequence:{useMaxWidth:true}});
+</script></body></html>

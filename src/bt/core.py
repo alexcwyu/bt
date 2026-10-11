@@ -653,7 +653,7 @@ class StrategyBase(Node):
             # in the new universe
             if self._has_strat_children:
                 for c in self._strat_children:
-                    funiverse[c] = np.nan
+                    funiverse.loc[:, c] = np.nan
 
             # must create to avoid pandas warning
             funiverse = pd.DataFrame(funiverse)

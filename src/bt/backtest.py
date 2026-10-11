@@ -795,6 +795,9 @@ class RandomBenchmarkResult(Result):
 
         ser = self.r_stats.loc[statistic]
 
+        # Empty and all-NaN samples cannot define a histogram or density.
+        if ser.dropna().empty:
+            raise ValueError("Cannot plot a histogram without any observations")
         ax = ser.hist(bins=bins, figsize=figsize, density=True, **kwargs)
         ax.set_title(title)
         plt.axvline(self.b_stats[statistic], linewidth=4, color="r")

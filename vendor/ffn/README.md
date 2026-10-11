@@ -1,0 +1,70 @@
+# ffn - Financial Functions for Python
+
+![ffn](docs/source/_static/logo.png)
+
+[![Build Status](https://github.com/pmorissette/ffn/workflows/Build%20Status/badge.svg)](https://github.com/pmorissette/ffn/actions/)
+[![PyPI Version](https://img.shields.io/pypi/v/ffn)](https://pypi.org/project/ffn/)
+[![PyPI License](https://img.shields.io/pypi/l/ffn)](https://pypi.org/project/ffn/)
+
+If you are looking for a full backtesting framework, please check out [bt](https://github.com/pmorissette/bt).
+bt is built atop ffn and makes it easy and fast to backtest quantitative strategies.
+
+## Overview
+
+<a id="a-brief-introduction"></a>
+
+ffn is a library that contains many useful functions for those who work in **quantitative
+finance**. It stands on the shoulders of giants (Pandas, Numpy, Scipy, etc.) and provides
+a vast array of utilities, from performance measurement and evaluation to
+graphing and common data transformations.
+
+```python
+import ffn
+returns = ffn.get('aapl,msft,c,gs,ge', provider='yahoo', start='2010-01-01').to_returns().dropna()
+print(returns.calc_mean_var_weights().as_format('.2%'))
+```
+
+Example output:
+
+```text
+    aapl    62.54%
+    c       -0.00%
+    ge      36.19%
+    gs      -0.00%
+    msft     1.26%
+    dtype: object
+```
+
+## Installation
+
+The easiest way to install `ffn` is from the [Python Package Index](https://pypi.python.org/pypi/ffn/)
+using `pip`.
+
+```bash
+pip install ffn
+```
+
+The Yahoo examples require the optional provider dependency:
+
+```bash
+pip install 'ffn[yahoo]'
+```
+
+Other providers can be passed as callables or installed as plugins. See [how to use a data provider](docs/source/data-providers.md).
+
+Since ffn has many dependencies, we strongly recommend installing the [Anaconda Scientific Python Distribution](https://store.continuum.io/cshop/anaconda/). This distribution comes with many of the required packages pre-installed, including pip. Once Anaconda is installed, the above command should complete the installation.
+
+## Documentation
+
+Read the docs at <https://pmorissette.github.io/ffn/>.
+
+- [Introduction](docs/source/introduction.md)
+- [Installation guide](docs/source/install.md)
+- [Quickstart](docs/source/quick.md)
+- [Data providers](docs/source/data-providers.md)
+- [Provider contract](docs/source/provider-contract.md)
+- [Full API](docs/source/ffn.md)
+
+## Contribute
+
+See the [development guide](docs/development.md) for setup, tests, documentation builds, and Copier template updates.
