@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier
+_commit: 5939e98
+_src_path: https://github.com/python-project-templates/base.git
+add_docs: true
+add_extension: cython
+add_wiki: false
+email: morissette.philippe@gmail.com
+github: pmorissette
+project_description: A flexible backtesting framework for Python
+project_name: bt
+python_version_primary: '3.11'
+team: Philippe Morissette

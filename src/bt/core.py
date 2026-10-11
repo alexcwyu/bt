@@ -21,7 +21,7 @@ def is_zero(x):
     return abs(x) < TOL
 
 
-class Node(object):
+class Node:
     """
     The Node is the main building block in bt's tree structure design.
     Both StrategyBase and SecurityBase inherit Node. It contains the
@@ -134,7 +134,41 @@ class Node(object):
         self._data = value
 
     def _sync_data(self):
-        pass
+        # Copies and pandas consolidation can detach columns from NumPy storage.
+        data = self._data
+        blocks = getattr(data._mgr, "blocks", None)
+        if blocks is not None and blocks is self._data_blocks:
+            return
+        shared = True
+        for column, values in self._data_arrays.items():
+            if not np.shares_memory(data[column].to_numpy(copy=False), values):
+                data[column] = values
+                shared = False
+        # BlockManager replaces this tuple on column insertion/consolidation.
+        self._data_blocks = blocks if shared else None
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_data_blocks", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._data_blocks = None
+        # deepcopy/pickle preserve array references, but copy Series separately.
+        for name, values in state.items():
+            if name.endswith("_arr"):
+                series = state.get(name[:-4])
+                if isinstance(series, pd.Series):
+                    setattr(self, name[:-4], pd.Series(values, index=series.index, name=series.name, copy=False))
+
+    def _allocate_data(self, index, columns):
+        # A single block keeps pandas 1.x consolidation from detaching our arrays.
+        values = np.zeros((len(index), len(columns)), dtype=np.float64, order="F")
+        self._data = pd.DataFrame(values, index=index, columns=columns, copy=False)
+        self._data_arrays = dict(zip(columns, values.T))
+        self._data_blocks = None
+        return self._data_arrays
 
     def __getitem__(self, key):
         return self.children[key]
@@ -169,7 +203,7 @@ class Node(object):
 
                 if isinstance(c, str):
                     if c in self._universe_tickers:
-                        raise ValueError("Child %s already exists" % c)
+                        raise ValueError(f"Child {c} already exists")
 
                     # Create default security with lazy_add
                     c = Security(c, lazy_add=True)
@@ -178,7 +212,7 @@ class Node(object):
                     self._lazy_children[c.name] = c
                 else:
                     if c.name in self.children:
-                        raise ValueError("Child %s already exists" % c)
+                        raise ValueError(f"Child {c} already exists")
 
                     c.parent = self
                     c._set_root(self.root)
@@ -312,21 +346,21 @@ class Node(object):
         if self.parent == self:
             return self.name
         else:
-            return "%s>%s" % (self.parent.full_name, self.name)
+            return f"{self.parent.full_name}>{self.name}"
 
     def __repr__(self):
-        return "<%s %s>" % (self.__class__.__name__, self.full_name)
+        return f"<{self.__class__.__name__} {self.full_name}>"
 
     def to_dot(self, root=True):
         """
         Represent the node structure in DOT format.
         """
-        name = lambda x: x.name or repr(self)  # noqa: E731
-        edges = "\n".join('\t"%s" -> "%s"' % (name(self), name(c)) for c in self.children.values())
+        name = lambda x: x.name or repr(self)
+        edges = "\n".join(f'\t"{name(self)}" -> "{name(c)}"' for c in self.children.values())
         below = "\n".join(c.to_dot(False) for c in self.children.values())
-        body = "\n".join([edges, below]).rstrip()
+        body = f"{edges}\n{below}".rstrip()
         if root:
-            return "\n".join(["digraph {", body, "}"])
+            return f"digraph {{\n{body}\n}}"
         return body
 
 
@@ -368,7 +402,8 @@ class StrategyBase(Node):
           commission (transaction fee) amount. Could be used to model
           slippage (implementation shortfall). Note that often fees are
           symmetric for buy and sell and absolute value of quantity should
-          be used for calculation.
+          be used for calculation. A dynamically attached Strategy inherits
+          its parent's current non-default commission function.
         * capital (float): Capital amount in Strategy - cash
         * universe (DataFrame): Data universe available at the current time.
           Universe contains the data passed in when creating a Backtest. Use
@@ -403,6 +438,11 @@ class StrategyBase(Node):
 
         # default commission function
         self.commission_fn = self._dflt_comm_fn
+        if isinstance(parent, StrategyBase):
+            commission_fn = parent.commission_fn
+            # Install configured fees before setup copies the subtree for paper trading.
+            if getattr(commission_fn, "__func__", None) is not StrategyBase._dflt_comm_fn:
+                self.set_commissions(commission_fn)
 
         self._paper_trade = False
         self._positions = None
@@ -488,7 +528,7 @@ class StrategyBase(Node):
                 self.root.update(self.now, None)
             return self._bidoffer_paid
         else:
-            raise Exception('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
+            raise RuntimeError('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
 
     @property
     def bidoffers_paid(self):
@@ -500,7 +540,7 @@ class StrategyBase(Node):
                 self.root.update(self.now, None)
             return self._bidoffers_paid.loc[: self.now]
         else:
-            raise Exception('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
+            raise RuntimeError('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
 
     @property
     def universe(self):
@@ -533,13 +573,15 @@ class StrategyBase(Node):
         """
         if self.root.stale:
             self.root.update(self.root.now, None)
-        outlays = pd.DataFrame()
+        # See the `positions` property below for why this builds a dict of
+        # Series first rather than accumulating columns on `outlays` directly.
+        cols: dict[str, pd.Series] = {}
         for x in self.securities:
-            if x.name in outlays.columns:
-                outlays[x.name] += x.outlays
+            if x.name in cols:
+                cols[x.name] = cols[x.name].add(x.outlays, fill_value=0)
             else:
-                outlays[x.name] = x.outlays
-        return outlays
+                cols[x.name] = x.outlays.copy()
+        return pd.DataFrame(cols)
 
     @property
     def positions(self):
@@ -550,13 +592,21 @@ class StrategyBase(Node):
         if self.root.stale:
             self.root.update(self.root.now, None)
 
-        vals = pd.DataFrame()
+        # Built as a plain dict of Series, not column-by-column on a
+        # DataFrame: `x.positions` returns a `.loc[]` slice, and assigning
+        # or += a slice into an existing DataFrame column is exactly the
+        # pattern pandas' Copy-on-Write flags as ChainedAssignmentError - it
+        # still produces the right answer today, but only because both
+        # `vals` and the slice happen to be freshly allocated each call.
+        # This isn't dependent on that.
+        cols: dict[str, pd.Series] = {}
         for x in self.members:
             if isinstance(x, SecurityBase):
-                if x.name in vals.columns:
-                    vals[x.name] += x.positions
+                if x.name in cols:
+                    cols[x.name] = cols[x.name].add(x.positions, fill_value=0)
                 else:
-                    vals[x.name] = x.positions
+                    cols[x.name] = x.positions.copy()
+        vals = pd.DataFrame(cols)
         self._positions = vals.fillna(0.0)
         return vals
 
@@ -573,7 +623,7 @@ class StrategyBase(Node):
         # strategies as the "price" is just a reference
         # value and should not be used for capital allocation
         if self.fixed_income and not self.parent.fixed_income:
-            raise ValueError("Cannot have fixed income strategy child (%s) of non-fixed income strategy (%s)" % (self.name, self.parent.name))
+            raise ValueError(f"Cannot have fixed income strategy child ({self.name}) of non-fixed income strategy ({self.parent.name})")
 
         # determine if needs paper trading
         # and setup if so
@@ -583,25 +633,21 @@ class StrategyBase(Node):
 
             paper = deepcopy(self)
             paper.parent = paper
-            paper.root = paper
+            paper._set_root(paper)
             paper._paper_trade = False
             paper.setup(self._original_data, **kwargs)
             paper.adjust(self._paper_amount)
             self._paper = paper
-
-        # setup universe
-        funiverse = universe.copy()
 
         # filter only if the node has any children specified as input,
         # otherwise we use the full universe. If all children are strategies,
         # funiverse will be empty, to signal that no other ticker should be
         # used in addition to the strategies
         if self._original_children_are_present:
-            # if we have universe_tickers defined, limit universe to
-            # those tickers
-            valid_filter = list(set(universe.columns).intersection(self._universe_tickers))
+            # Limit the universe by name while preserving its original column order.
+            valid_filter = universe.columns.isin(self._universe_tickers)
 
-            funiverse = universe[valid_filter].copy()
+            funiverse = universe.loc[:, valid_filter].copy()
 
             # if we have strat children, we will need to create their columns
             # in the new universe
@@ -611,6 +657,9 @@ class StrategyBase(Node):
 
             # must create to avoid pandas warning
             funiverse = pd.DataFrame(funiverse)
+        else:
+            # Copy the full universe only when retained, avoiding a discarded allocation.
+            funiverse = universe.copy()
 
         self._universe = funiverse
         # holds filtered universe
@@ -620,24 +669,32 @@ class StrategyBase(Node):
         # We're not bankrupt yet
         self.bankrupt = False
 
-        # setup internal data
-        self.data = pd.DataFrame(
-            index=funiverse.index,
-            columns=["price", "value", "notional_value", "cash", "fees", "flows"],
-            data=0.0,
-        )
+        # Use NumPy storage with cached pandas views for public history access.
+        self._index = funiverse.index
+        columns = ["price", "value", "notional_value", "cash", "fees", "flows"]
+        self._bidoffer_set = "bidoffer" in kwargs
+        self._bidoffer_paid = 0
+        if self._bidoffer_set:
+            columns.append("bidoffer_paid")
 
-        self._prices = self.data["price"]
-        self._values = self.data["value"]
-        self._notl_values = self.data["notional_value"]
-        self._cash = self.data["cash"]
-        self._fees = self.data["fees"]
-        self._all_flows = self.data["flows"]
+        arrays = self._allocate_data(self._index, columns)
+        self._prices_arr = arrays["price"]
+        self._values_arr = arrays["value"]
+        self._notl_values_arr = arrays["notional_value"]
+        self._cash_arr = arrays["cash"]
+        self._fees_arr = arrays["fees"]
+        self._all_flows_arr = arrays["flows"]
+        if self._bidoffer_set:
+            self._bidoffers_paid_arr = arrays["bidoffer_paid"]
 
-        if "bidoffer" in kwargs:
-            self._bidoffer_set = True
-            self.data["bidoffer_paid"] = 0.0
-            self._bidoffers_paid = self.data["bidoffer_paid"]
+        self._prices = self._data["price"]
+        self._values = self._data["value"]
+        self._notl_values = self._data["notional_value"]
+        self._cash = self._data["cash"]
+        self._fees = self._data["fees"]
+        self._all_flows = self._data["flows"]
+        if self._bidoffer_set:
+            self._bidoffers_paid = self._data["bidoffer_paid"]
 
         # setup children as well - use original universe here - don't want to
         # pollute with potential strategy children in funiverse
@@ -660,6 +717,8 @@ class StrategyBase(Node):
         self.setup(self.parent._original_data, **all_kwargs)
         if self.name not in self.parent._universe:
             self.parent._universe[self.name] = np.nan
+            # A same-date cached slice does not include newly registered columns.
+            self.parent._last_chk = None
 
     def get_data(self, key):
         """
@@ -670,16 +729,6 @@ class StrategyBase(Node):
         to be run against different data sets more easily.
         """
         return self._setup_kwargs[key]
-
-    def _sync_data(self):
-        self._data["price"] = self._prices
-        self._data["value"] = self._values
-        self._data["notional_value"] = self._notl_values
-        self._data["cash"] = self._cash
-        self._data["fees"] = self._fees
-        self._data["flows"] = self._all_flows
-        if self._bidoffer_set:
-            self._data["bidoffer_paid"] = self._bidoffers_paid
 
     @cy.locals(
         newpt=cy.bint,
@@ -693,6 +742,27 @@ class StrategyBase(Node):
         """
         Update strategy. Updates prices, values, weight, etc.
         """
+        if self._has_strat_children or "coupons" in self._setup_kwargs or "cost_long" in self._setup_kwargs or "cost_short" in self._setup_kwargs:
+            if inow is None:
+                if date == 0:
+                    inow = 0
+                else:
+                    inow = self._index.get_loc(date)
+
+            # Include child-specific inputs and paper portfolios that will update
+            # on this date, before any calling strategy or sibling changes state.
+            pending = [self]
+            while pending:
+                strategy = pending.pop()
+                for child in strategy._childrenv:
+                    if isinstance(child, StrategyBase):
+                        pending.append(child)
+                    elif isinstance(child, CouponPayingSecurity) and child._needupdate:
+                        child._holding_cost_for_update(date, inow)
+                        child._coupon_for_update(date, inow)
+                if strategy._paper_trade and (strategy.now == 0 or strategy.now != date):
+                    pending.append(strategy._paper)
+
         # resolve stale state
         self.root.stale = False
 
@@ -715,7 +785,7 @@ class StrategyBase(Node):
             if self.now == 0:
                 inow = 0
             else:
-                inow = self._data.index.get_loc(date)
+                inow = self._index.get_loc(date)
 
         # update children if any and calculate value
         val = self._capital  # default if no children
@@ -745,25 +815,24 @@ class StrategyBase(Node):
         self._capital += coupons
         val += coupons
 
-        if self.root == self:
-            if (val < 0) and not self.bankrupt and not self.fixed_income and not is_zero(val):
-                # Declare a bankruptcy
-                self.bankrupt = True
-                self.flatten()
+        if self.root == self and (val < 0) and not self.bankrupt and not self.fixed_income and not is_zero(val):
+            # Declare a bankruptcy
+            self.bankrupt = True
+            self.flatten()
 
         # update data if this value is different or
         # if now has changed - avoid all this if not since it
         # won't change
         if newpt or not is_zero(self._value - val) or not is_zero(self._notl_value - notl_val):
             self._value = val
-            self._values.iloc[inow] = val
+            self._values_arr[inow] = val
 
             self._notl_value = notl_val
-            self._notl_values.iloc[inow] = notl_val
+            self._notl_values_arr[inow] = notl_val
 
             if self._bidoffer_set:
                 self._bidoffer_paid = bidoffer_paid
-                self._bidoffers_paid.iloc[inow] = bidoffer_paid
+                self._bidoffers_paid_arr[inow] = bidoffer_paid
 
             if self.fixed_income:
                 # For notional weights, we compute additive return
@@ -778,14 +847,14 @@ class StrategyBase(Node):
                         ret = 0
                     else:
                         raise ZeroDivisionError(
-                            "Could not update %s on %s. Last notional value "
-                            "was %s and pnl was %s. Therefore, "
+                            f"Could not update {self.name} on {self.now}. Last notional value "
+                            f"was {self._last_notl_value} and pnl was {pnl}. Therefore, "
                             "we are dividing by zero to obtain the pnl "
-                            "per unit notional for the period." % (self.name, self.now, self._last_notl_value, pnl)
+                            "per unit notional for the period."
                         )
 
                 self._price = self._last_price + ret
-                self._prices.iloc[inow] = self._price
+                self._prices_arr[inow] = self._price
 
             else:
                 bottom = self._last_value + self._net_flows
@@ -794,24 +863,23 @@ class StrategyBase(Node):
                 else:
                     if is_zero(self._value):
                         ret = 0
+                    elif self.parent == self and is_zero(self._capital) and is_zero(self._last_value) and is_zero(self._net_flows):
+                        # Paper-trade root strategies can open their initial
+                        # positions before their synthetic return series has a
+                        # non-zero base. Treat that bootstrap step as a flat
+                        # return and let the paper price drive performance.
+                        ret = 0
                     else:
                         raise ZeroDivisionError(
-                            "Could not update %s on %s. Last value "
-                            "was %s and net flows were %s. Current"
-                            "value is %s. Therefore, "
+                            f"Could not update {self.name} on {self.now}. Last value "
+                            f"was {self._last_value} and net flows were {self._net_flows}. Current"
+                            f"value is {self._value}. Therefore, "
                             "we are dividing by zero to obtain the return "
                             "for the period."
-                            % (
-                                self.name,
-                                self.now,
-                                self._last_value,
-                                self._net_flows,
-                                self._value,
-                            )
                         )
 
                 self._price = self._last_price * (1 + ret)
-                self._prices.iloc[inow] = self._price
+                self._prices_arr[inow] = self._price
 
         # update children weights
         if self.children:
@@ -836,23 +904,33 @@ class StrategyBase(Node):
             for c in self._strat_children:
                 # TODO: optimize ".loc" here as well
                 self._universe.loc[date, c] = self.children[c].price
+                # Copy-on-write can leave a same-date cached slice at the old price.
+                self._last_chk = None
 
         # Cash should track the unallocated capital at the end of the day, so
         # we should update it every time we call "update".
         # Same for fees and flows
-        self._cash.iloc[inow] = self._capital
-        self._fees.iloc[inow] = self._last_fee
-        self._all_flows.iloc[inow] = self._net_flows
+        self._cash_arr[inow] = self._capital
+        self._fees_arr[inow] = self._last_fee
+        self._all_flows_arr[inow] = self._net_flows
 
         # update paper trade if necessary
         if self._paper_trade:
             if newpt:
-                self._paper.update(date)
-                self._paper.run()
-                self._paper.update(date)
+                # Paper portfolios have independent roots, including deeper
+                # paper trees. Propagate only Backtest's explicit reference phase.
+                bootstrap = getattr(self.root, "_in_bootstrap", False)
+                self._paper._in_bootstrap = bootstrap
+                try:
+                    self._paper.update(date)
+                    if not bootstrap:
+                        self._paper.run()
+                    self._paper.update(date)
+                finally:
+                    self._paper._in_bootstrap = False
             # update price
             self._price = self._paper.price
-            self._prices.iloc[inow] = self._price
+            self._prices_arr[inow] = self._price
 
     @cy.locals(amount=cy.double, update=cy.bint, flow=cy.bint, fees=cy.double)
     def adjust(self, amount, update=True, flow=True, fee=0.0):
@@ -861,16 +939,21 @@ class StrategyBase(Node):
         of capital will have no effect on the children.
 
         Args:
-            * amount (float): Amount to adjust by.
+            * amount (float): Amount to adjust by. Must be finite when flow=True;
+              otherwise ValueError is raised before accounting state changes.
             * update (bool): Force update?
             * flow (bool): Is this adjustment a flow? A flow will not have an
-              impact on the performance (price index). Example of flows are
-              simply capital injections (say a monthly contribution to a
-              portfolio). This should not be reflected in the returns. A
-              non-flow (flow=False) does impact performance. A good example
-              of this is a commission, or a dividend.
+              impact on this strategy's or its ancestors' performance (price
+              index). Example of flows are simply capital injections (say a
+              monthly contribution to a portfolio). This should not be
+              reflected in the returns. A non-flow (flow=False) does impact
+              performance. A good example of this is a commission, or a
+              dividend.
 
         """
+        if flow and not math.isfinite(amount):
+            raise ValueError("Capital flow amount must be finite")
+
         # adjust capital
         self._capital += amount
         self._last_fee += fee
@@ -879,7 +962,12 @@ class StrategyBase(Node):
         # performance. Commissions and other fees are not flows since
         # they have a performance impact
         if flow:
-            self._net_flows += amount
+            node = self
+            while True:
+                node._net_flows += amount
+                if node.parent is node:
+                    break
+                node = node.parent
 
         if update:
             # indicates that data is now stale and must
@@ -922,8 +1010,10 @@ class StrategyBase(Node):
                 # and therefore should not incur flow
                 self.parent.adjust(-amount, update=False, flow=False)
 
-            # adjust self's capital
-            self.adjust(amount, update=False, flow=True)
+            # Internal allocation is a flow only for the receiving sleeve;
+            # the ancestors' total values do not change.
+            self.adjust(amount, update=False, flow=False)
+            self._net_flows += amount
 
             # push allocation down to children if any
             # use _weight to avoid triggering an update
@@ -1047,10 +1137,13 @@ class StrategyBase(Node):
             c.flatten()
 
         if self.fixed_income:
-            if c.position != 0.0:
+            if c._issec and c.position != 0.0:
                 c.transact(-c.position, update=update)
         else:
-            if c.value != 0.0 and not np.isnan(c.value):
+            # A zero price can hide a live security position behind zero value.
+            if c._issec and c.value == 0.0 and c.position != 0.0:
+                c.transact(-c.position, update=update)
+            elif c.value != 0.0 and not np.isnan(c.value):
                 c.allocate(-c.value, update=update)
 
     def flatten(self):
@@ -1059,9 +1152,19 @@ class StrategyBase(Node):
         """
         # go right to base alloc
         if self.fixed_income:
-            [c.transact(-c.position, update=False) for c in self._childrenv if c.position != 0]
+            for c in self._childrenv:
+                if c._issec:
+                    if c.position != 0.0:
+                        c.transact(-c.position, update=False)
+                else:
+                    c.flatten()
         else:
-            [c.allocate(-c.value, update=False) for c in self._childrenv if c.value != 0]
+            for c in self._childrenv:
+                # A zero price can hide a live security position behind zero value.
+                if c._issec and c.value == 0.0 and c.position != 0.0:
+                    c.transact(-c.position, update=False)
+                elif c.value != 0.0:
+                    c.allocate(-c.value, update=False)
 
         self.root.stale = True
 
@@ -1071,7 +1174,6 @@ class StrategyBase(Node):
         algorithm to execute on each date change. This method is called by
         backtester.
         """
-        pass
 
     def set_commissions(self, fn):
         """
@@ -1100,13 +1202,16 @@ class StrategyBase(Node):
         # series
         prc = pd.DataFrame({x.name: x.prices for x in self.securities}).unstack()
 
-        # get security positions
-        positions = pd.DataFrame()
+        # get security positions - see StrategyBase.positions for why this
+        # builds a dict of Series first rather than accumulating columns
+        # directly on `positions`.
+        cols: dict[str, pd.Series] = {}
         for x in self.securities:
-            if x.name in positions.columns:
-                positions[x.name] += x.positions
+            if x.name in cols:
+                cols[x.name] = cols[x.name].add(x.positions, fill_value=0)
             else:
-                positions[x.name] = x.positions
+                cols[x.name] = x.positions.copy()
+        positions = pd.DataFrame(cols)
         # trades are diff
         trades = positions.diff()
         # must adjust first row
@@ -1193,6 +1298,7 @@ class SecurityBase(Node):
     _needupdate = cy.declare(cy.bint)
     _outlay = cy.declare(cy.double)
     _bidoffer = cy.declare(cy.double)
+    _extra_data_columns = ()
 
     @cy.locals(multiplier=cy.double)
     def __init__(self, name, multiplier=1, lazy_add=False):
@@ -1311,7 +1417,7 @@ class SecurityBase(Node):
                 self.update(self.root.now)
             return self._bidoffers.loc[: self.now]
         else:
-            raise Exception('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
+            raise RuntimeError('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
 
     @property
     def bidoffer_paid(self):
@@ -1336,7 +1442,7 @@ class SecurityBase(Node):
                 self.root.update(self.root.now, None)
             return self._bidoffers_paid.loc[: self.now]
         else:
-            raise Exception('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
+            raise RuntimeError('Bid/offer accounting not turned on: "bidoffer" argument not provided during setup')
 
     def setup(self, universe, **kwargs):
         """
@@ -1359,69 +1465,71 @@ class SecurityBase(Node):
         except KeyError:
             prices = None
 
-        # setup internal data
+        # Store index for date lookups
+        self._index = universe.index
+
+        columns = ["value", "position", "notional_value", "outlay"]
         if prices is not None:
-            self._prices = prices
-            self.data = pd.DataFrame(
-                index=universe.index,
-                columns=["value", "position", "notional_value"],
-                data=0.0,
-            )
+            self._prices_arr = np.array(prices, copy=True)
             self._prices_set = True
         else:
-            self.data = pd.DataFrame(
-                index=universe.index,
-                columns=["price", "value", "position", "notional_value"],
-            )
-            self._prices = self.data["price"]
             self._prices_set = False
-
-        self._values = self.data["value"]
-        self._notl_values = self.data["notional_value"]
-        self._positions = self.data["position"]
-
-        # add _outlay
-        self.data["outlay"] = 0.0
-        self._outlays = self.data["outlay"]
+            columns.insert(0, "price")
 
         # save bidoffer, if provided
-        if "bidoffer" in kwargs:
-            self._bidoffer_set = True
-            self._bidoffers = kwargs["bidoffer"]
+        self._bidoffer_set = "bidoffer" in kwargs
+        self._bidoffer_paid = 0
+        if self._bidoffer_set:
+            all_bidoffers = kwargs["bidoffer"]
             try:
-                bidoffers = self._bidoffers[self.name]
+                bidoffers = all_bidoffers[self.name]
             except KeyError:
                 bidoffers = None
 
             if bidoffers is not None:
                 if bidoffers.index.equals(universe.index):
-                    self._bidoffers = bidoffers
+                    self._bidoffers_arr = np.array(bidoffers, copy=True)
                 else:
                     raise ValueError("Index of bidoffer must match universe data")
             else:
-                self.data["bidoffer"] = 0.0
-                self._bidoffers = self.data["bidoffer"]
+                columns.append("bidoffer")
 
-            self.data["bidoffer_paid"] = 0.0
-            self._bidoffers_paid = self.data["bidoffer_paid"]
+            columns.append("bidoffer_paid")
+
+        columns.extend(self._extra_data_columns)
+        arrays = self._allocate_data(self._index, columns)
+        self._values_arr = arrays["value"]
+        self._positions_arr = arrays["position"]
+        self._notl_values_arr = arrays["notional_value"]
+        self._outlays_arr = arrays["outlay"]
+        if not self._prices_set:
+            self._prices_arr = arrays["price"]
+            for column in ["price", "value", "position", "notional_value"]:
+                arrays[column].fill(np.nan)
+        if self._bidoffer_set:
+            if "bidoffer" in arrays:
+                self._bidoffers_arr = arrays["bidoffer"]
+            self._bidoffers_paid_arr = arrays["bidoffer_paid"]
+
+        self._prices = pd.Series(self._prices_arr, index=self._index, name=self.name, copy=False) if self._prices_set else self._data["price"]
+        self._values = self._data["value"]
+        self._positions = self._data["position"]
+        self._notl_values = self._data["notional_value"]
+        self._outlays = self._data["outlay"]
+        if self._bidoffer_set:
+            self._bidoffers = self._data["bidoffer"] if "bidoffer" in arrays else pd.Series(self._bidoffers_arr, index=self._index, name=self.name, copy=False)
+            self._bidoffers_paid = self._data["bidoffer_paid"]
 
         self._data_ready = True
 
-    def _sync_data(self):
-        if not self._prices_set:
-            self._data["price"] = self._prices
-        self._data["value"] = self._values
-        self._data["notional_value"] = self._notl_values
-        self._data["position"] = self._positions
-        self._data["outlay"] = self._outlays
-        if self._bidoffer_set:
-            self._data["bidoffer_paid"] = self._bidoffers_paid
-
-    @cy.locals(prc=cy.double)
+    @cy.locals(prc=cy.double, value=cy.double)
     def update(self, date, data=None, inow=None):
         """
         Update security with a given date and optionally, some data.
         This will update price, value, weight, etc.
+
+        Prospective prices and values are validated before changing current
+        state or history. Missing prices remain valid for zero positions.
         """
         # filter for internal calls when position has not changed - nothing to
         # do. Internal calls (stale root calls) have None data. Also want to
@@ -1434,53 +1542,66 @@ class SecurityBase(Node):
             if date == 0:
                 inow = 0
             else:
-                inow = self._data.index.get_loc(date)
+                inow = self._index.get_loc(date)
+
+        prc = self._price
+
+        # date change - select the prospective price
+        if date != self.now:
+            if self._prices_set:
+                prc = self._prices_arr[inow]
+            elif data is not None:
+                prc = data[self.name]
+
+        # Validate before exposing the prospective observation or derived value.
+        if math.isinf(prc):
+            raise ValueError(f"Price is infinite for security {self.name} on {date}. Cannot update node value.")
+        if math.isnan(prc):
+            if is_zero(self._position):
+                value = 0.0
+            else:
+                raise ValueError(f"Position is open (non-zero: {self._position}) and latest price is NaN for security {self.name} on {date}. Cannot update node value.")
+        else:
+            # Float arithmetic reaches validation regardless of NumPy error settings.
+            value = float(self._position) * float(prc) * float(self.multiplier)
+            if not math.isfinite(value):
+                raise ValueError(f"Price {prc} produces a non-finite value for security {self.name} on {date}. Cannot update node value.")
 
         # date change - update price
         if date != self.now:
             # update now
             self.now = date
 
-            if self._prices_set:
-                self._price = self._prices.iloc[inow]
+            self._price = prc
             # traditional data update
-            elif data is not None:
-                prc = data[self.name]
-                self._price = prc
-                self._prices.iloc[inow] = prc
+            if not self._prices_set and data is not None:
+                self._prices_arr[inow] = prc
 
             # update bid/offer
             if self._bidoffer_set:
-                self._bidoffer = self._bidoffers.iloc[inow]
+                self._bidoffer = self._bidoffers_arr[inow]
                 self._bidoffer_paid = 0.0
 
-        self._positions.iloc[inow] = self._position
+        self._positions_arr[inow] = self._position
         self._last_pos = self._position
-
-        if np.isnan(self._price):
-            if is_zero(self._position):
-                self._value = 0
-            else:
-                raise Exception("Position is open (non-zero: %s) and latest price is NaN for security %s on %s. Cannot update node value." % (self._position, self.name, date))
-        else:
-            self._value = self._position * self._price * self.multiplier
+        self._value = value
 
         self._notl_value = self._value
 
-        self._values.iloc[inow] = self._value
-        self._notl_values.iloc[inow] = self._notl_value
+        self._values_arr[inow] = self._value
+        self._notl_values_arr[inow] = self._notl_value
 
         if is_zero(self._weight) and is_zero(self._position):
             self._needupdate = False
 
         # save outlay to outlays
         if self._outlay != 0:
-            self._outlays.iloc[inow] += self._outlay
+            self._outlays_arr[inow] += self._outlay
             # reset outlay back to 0
             self._outlay = 0
 
         if self._bidoffer_set:
-            self._bidoffers_paid.iloc[inow] = self._bidoffer_paid
+            self._bidoffers_paid_arr[inow] = self._bidoffer_paid
 
     @cy.locals(amount=cy.double, update=cy.bint, q=cy.double, outlay=cy.double, i=cy.int)
     def allocate(self, amount, update=True):
@@ -1505,21 +1626,16 @@ class SecurityBase(Node):
         if self._needupdate or self.now != self.parent.now:
             self.update(self.parent.now)
 
-        # ignore 0 alloc
-        # Note that if the price of security has dropped to zero, then it
-        # should never be selected by SelectAll, SelectN etc. I.e. we should
-        # not open the position at zero price. At the same time, we are able
-        # to close it at zero price, because at that point amount=0.
-        # Note also that we don't erase the position in an asset which price
-        # has dropped to zero (though the weight will indeed be = 0)
+        # Ignore zero adjustments. StrategyBase.close handles a live position
+        # whose price and value are zero by transacting its exact quantity.
         if is_zero(amount):
             return
 
         if self.parent is self or self.parent is None:
-            raise Exception("Cannot allocate capital to a parentless security")
+            raise RuntimeError("Cannot allocate capital to a parentless security")
 
         if is_zero(self._price) or np.isnan(self._price):
-            raise Exception("Cannot allocate capital to %s because price is %s as of %s" % (self.name, self._price, self.parent.now))
+            raise ValueError(f"Cannot allocate capital to {self.name} because price is {self._price} as of {self.parent.now}")
 
         # buy/sell
         # determine quantity - must also factor in commission
@@ -1553,7 +1669,7 @@ class SecurityBase(Node):
         # sell additional units to fund this requirement. As such, q must once
         # again decrease.
         #
-        if not q == -self._position:
+        if q != -self._position:
             full_outlay, _, _, _ = self.outlay(q)
 
             # if full outlay > amount, we must decrease the magnitude of `q`
@@ -1588,15 +1704,23 @@ class SecurityBase(Node):
                 if self.integer_positions:
                     full_outlay_of_1_more, _, _, _ = self.outlay(q + 1)
 
-                    if full_outlay < amount and full_outlay_of_1_more > amount:
-                        break
+                    if full_outlay < amount:
+                        if full_outlay_of_1_more > amount:
+                            break
+
+                        # The root-search step can skip an affordable integer
+                        # quantity when commissions are non-linear. Move back
+                        # one share so the search keeps the closest affordable
+                        # outlay instead of treating the larger gap as an error.
+                        q += 1
+                        full_outlay = full_outlay_of_1_more
 
                 # if not integer positions then we should keep going until
                 # full_outlay == amount or is close enough
 
                 i = i + 1
                 if i > 1e4:
-                    raise Exception(
+                    raise RuntimeError(
                         "Potentially infinite loop detected. This occurred "
                         "while trying to reduce the amount of shares purchased"
                         " to respect the outlay <= amount rule. This is most "
@@ -1606,7 +1730,7 @@ class SecurityBase(Node):
                     )
 
                 if self.integer_positions and last_q == q:
-                    raise Exception(
+                    raise RuntimeError(
                         "Newton Method like root search for quantity is stuck!"
                         " q did not change in iterations so it is probably a bug"
                         " but we are not entirely sure it is wrong! Consider "
@@ -1615,7 +1739,7 @@ class SecurityBase(Node):
                 last_q = q
 
                 if np.abs(full_outlay - amount) > np.abs(last_amount_short):
-                    raise Exception(
+                    raise RuntimeError(
                         "The difference between what we have raised with q and"
                         " the amount we are trying to raise has gotten bigger since"
                         " last iteration! full_outlay should always be approaching"
@@ -1630,7 +1754,9 @@ class SecurityBase(Node):
         q=cy.double,
         update=cy.bint,
         update_self=cy.bint,
+        full_outlay=cy.double,
         outlay=cy.double,
+        fee=cy.double,
         bidoffer=cy.double,
     )
     def transact(self, q, update=True, update_self=True, price=None):
@@ -1641,7 +1767,8 @@ class SecurityBase(Node):
         The amount of shares is explicitly provided, a
         commission will be calculated based on the parent's commission fn, and
         any remaining capital will be passed back up  to parent as an
-        adjustment.
+        adjustment. Derived outlay and cost components must be finite; invalid
+        results are rejected before trade state changes.
 
         Args:
             * amount (float): Amount of adjustment.
@@ -1662,6 +1789,11 @@ class SecurityBase(Node):
         if price is not None and not self._bidoffer_set:
             raise ValueError('Cannot transact at custom prices when "bidoffer" has not been passed during setup to enable bid-offer tracking.')
 
+        # A rejected trade must not expose a partial position or accounting update.
+        full_outlay, outlay, fee, bidoffer = self.outlay(q, p=price)
+        if not (math.isfinite(full_outlay) and math.isfinite(outlay) and math.isfinite(fee) and math.isfinite(bidoffer)):
+            raise ValueError("Transaction outlay and costs must be finite")
+
         # this security will need an update, even if pos is 0 (for example if
         # we close the positions, value and pos is 0, but still need to do that
         # last update)
@@ -1669,12 +1801,6 @@ class SecurityBase(Node):
 
         # adjust position & value
         self._position += q
-
-        # calculate proper adjustment for parent
-        # parent passed down amount so we want to pass
-        # -outlay back up to parent to adjust for capital
-        # used
-        full_outlay, outlay, fee, bidoffer = self.outlay(q, p=price)
 
         # store outlay for future reference
         self._outlay += outlay
@@ -1723,7 +1849,6 @@ class SecurityBase(Node):
         """
         Does nothing - securities have nothing to do on run.
         """
-        pass
 
 
 class Security(SecurityBase):
@@ -1736,8 +1861,6 @@ class Security(SecurityBase):
     all securities.
     """
 
-    pass
-
 
 class FixedIncomeSecurity(SecurityBase):
     """
@@ -1745,6 +1868,11 @@ class FixedIncomeSecurity(SecurityBase):
     measured only based on the quantity (par value) of the security.
     Only relevant when using :class:`FixedIncomeStrategy <bt.core.FixedIncomeStrategy>`.
     """
+
+    @cy.locals(multiplier=cy.double)
+    def __init__(self, name, multiplier=1, lazy_add=False):
+        super().__init__(name, multiplier, lazy_add)
+        self._fixed_income = True
 
     @cy.locals(coupon=cy.double)
     def update(self, date, data=None, inow=None):
@@ -1757,13 +1885,14 @@ class FixedIncomeSecurity(SecurityBase):
             if date == 0:
                 inow = 0
             else:
-                inow = self._data.index.get_loc(date)
+                inow = self._index.get_loc(date)
 
-        super(FixedIncomeSecurity, self).update(date, data, inow)
+        super().update(date, data, inow)
 
-        # For fixed income securities (bonds, swaps), notional value is position size, not value!
-        self._notl_value = self._position
-        self._notl_values.iloc[inow] = self._notl_value
+        if self.fixed_income:
+            # Quantity-notional mode overrides SecurityBase's market-value notional.
+            self._notl_value = self._position
+            self._notl_values_arr[inow] = self._notl_value
 
 
 class CouponPayingSecurity(FixedIncomeSecurity):
@@ -1793,14 +1922,17 @@ class CouponPayingSecurity(FixedIncomeSecurity):
 
     Represents a coupon-paying security, where coupon payments adjust
     the capital of the parent. Coupons and costs must be passed in during setup.
+    Applicable coupon payments, holding-cost observations, and derived costs
+    must be finite. Coupons are not applied while the position is zero.
     """
 
     _coupon = cy.declare(cy.double)
     _holding_cost = cy.declare(cy.double)
+    _extra_data_columns = ("coupon", "holding_cost")
 
     @cy.locals(multiplier=cy.double)
     def __init__(self, name, multiplier=1, fixed_income=True, lazy_add=False):
-        super(CouponPayingSecurity, self).__init__(name, multiplier)
+        super().__init__(name, multiplier)
         self._coupon = 0
         self._holding_cost = 0
         self._fixed_income = fixed_income
@@ -1816,49 +1948,102 @@ class CouponPayingSecurity(FixedIncomeSecurity):
             * coupons (DataFrame): Manatory DataFrame of coupon/carry amount with
               the same schema as universe.
             * cost_long (DataFrame): Optional DataFrame containing the cost of
-              holding a unit long position in the security (i.e. funding).
+              holding a unit long position in the security (i.e. funding), with
+              the same index as universe.
             * cost_short (DataFrame): Optional DataFrame containing the cost of
-              holding a unit short position in the security (i.e. repo).
+              holding a unit short position in the security (i.e. repo), with
+              the same index as universe.
             * kwargs (dict): Dictionary of additional information needed by
               the strategy. In particular, often takes the form of a DataFrame
               of security level information (i.e. signals, risk, etc).
         """
-        super(CouponPayingSecurity, self).setup(universe, **kwargs)
-
-        # Handle coupons
+        # Validate all carry inputs before base setup installs persistent data.
         if "coupons" not in kwargs:
-            raise Exception('"coupons" must be passed to setup for a CouponPayingSecurity')
+            raise ValueError('"coupons" must be passed to setup for a CouponPayingSecurity')
 
         try:
-            self._coupons = kwargs["coupons"][self.name]
+            coupons = kwargs["coupons"][self.name]
         except KeyError:
-            self._coupons = None
+            coupons = None
 
-        if self._coupons is None or not self._coupons.index.equals(universe.index):
+        if coupons is None or not coupons.index.equals(universe.index):
             raise ValueError("Index of coupons must match universe data")
 
-        # Handle holding costs
         try:
-            self._cost_long = kwargs["cost_long"][self.name]
+            cost_long = kwargs["cost_long"][self.name]
         except KeyError:
-            self._cost_long = None
+            cost_long = None
         try:
-            self._cost_short = kwargs["cost_short"][self.name]
+            cost_short = kwargs["cost_short"][self.name]
         except KeyError:
-            self._cost_short = None
+            cost_short = None
 
-        self.data["coupon"] = 0.0
-        self.data["holding_cost"] = 0.0
-        self._coupon_income = self.data["coupon"]
-        self._holding_costs = self.data["holding_cost"]
+        for cost, name in ((cost_long, "cost_long"), (cost_short, "cost_short")):
+            if cost is not None and not cost.index.equals(universe.index):
+                raise ValueError(f"Index of {name} must match universe data")
 
-    def _sync_data(self):
-        super(CouponPayingSecurity, self)._sync_data()
-        if hasattr(self, "_holding_costs"):
-            self._data["coupon"] = self._coupon_income
-            self._data["holding_cost"] = self._holding_costs
+        super().setup(universe, **kwargs)
 
-    @cy.locals(coupon=cy.double, cost=cy.double)
+        self._coupons = coupons
+        self._cost_long = cost_long
+        self._cost_short = cost_short
+
+        self._coupon_income_arr = self._data_arrays["coupon"]
+        self._holding_costs_arr = self._data_arrays["holding_cost"]
+        self._coupon_income = self._data["coupon"]
+        self._holding_costs = self._data["holding_cost"]
+
+    @cy.locals(cost=cy.double, holding_cost=cy.double, has_holding_cost=cy.bint)
+    def _holding_cost_for_update(self, date, inow):
+        """Return the applicable finite holding cost without changing state."""
+        if self._position > 0 and self._cost_long is not None:
+            raw_cost = self._cost_long.iloc[inow]
+            has_holding_cost = True
+        elif self._position < 0 and self._cost_short is not None:
+            raw_cost = self._cost_short.iloc[inow]
+            has_holding_cost = True
+        else:
+            has_holding_cost = False
+
+        if not has_holding_cost:
+            holding_cost = 0.0
+        else:
+            try:
+                cost = float(raw_cost)
+            except (TypeError, ValueError):
+                raise ValueError(f"Holding cost must be finite for security {self.name} on {date}. Cannot update node value.") from None
+            if not math.isfinite(cost):
+                raise ValueError(f"Holding cost must be finite for security {self.name} on {date}. Cannot update node value.")
+            holding_cost = abs(float(self._position)) * cost
+            if not math.isfinite(holding_cost):
+                raise ValueError(f"Holding cost must be finite for security {self.name} on {date}. Cannot update node value.")
+
+        return holding_cost
+
+    @cy.locals(coupon=cy.double, coupon_payment=cy.double)
+    def _coupon_for_update(self, date, inow):
+        """Return the applicable finite coupon payment without changing state."""
+        if self._coupons is None:
+            raise RuntimeError(f"coupons have not been set for security {self.name}")
+
+        # Missing or otherwise unusable observations are irrelevant without a position.
+        if self._position == 0.0:
+            return 0.0
+
+        try:
+            coupon = float(self._coupons.iloc[inow])
+        except (TypeError, ValueError):
+            raise ValueError(f"Coupon payment must be finite for security {self.name} on {date}. Cannot update node value.") from None
+        if not math.isfinite(coupon):
+            raise ValueError(f"Coupon payment must be finite for security {self.name} on {date}. Cannot update node value.")
+
+        coupon_payment = float(self._position) * coupon
+        if not math.isfinite(coupon_payment):
+            raise ValueError(f"Coupon payment must be finite for security {self.name} on {date}. Cannot update node value.")
+
+        return coupon_payment
+
+    @cy.locals(coupon=cy.double, holding_cost=cy.double)
     def update(self, date, data=None, inow=None):
         """
         Update security with a given date and optionally, some data.
@@ -1868,40 +2053,26 @@ class CouponPayingSecurity(FixedIncomeSecurity):
             if date == 0:
                 inow = 0
             else:
-                inow = self._data.index.get_loc(date)
+                inow = self._index.get_loc(date)
 
-        if self._coupons is None:
-            raise Exception("coupons have not been set for security %s" % self.name)
+        # Validate the applicable carry before the base update changes state.
+        holding_cost = self._holding_cost_for_update(date, inow)
+        coupon = self._coupon_for_update(date, inow)
 
         # Standard update
-        super(CouponPayingSecurity, self).update(date, data, inow)
+        super().update(date, data, inow)
 
-        coupon = self._coupons.iloc[inow]
         # If we were to call self.parent.adjust, then all the child weights would
         # need to be updated. If each security pays a coupon, then this happens for
         # each child. Instead, we store the coupon on self._capital, and it gets
         # swept up as part of the strategy update
+        self._coupon = coupon
 
-        if np.isnan(coupon):
-            if is_zero(self._position):
-                self._coupon = 0.0
-            else:
-                raise Exception("Position is open (non-zero) and latest coupon is NaN for security %s on %s. Cannot update node value." % (self.name, date))
-        else:
-            self._coupon = self._position * coupon
-
-        if self._position > 0 and self._cost_long is not None:
-            cost = self._cost_long.iloc[inow]
-            self._holding_cost = self._position * cost
-        elif self._position < 0 and self._cost_short is not None:
-            cost = self._cost_short.iloc[inow]
-            self._holding_cost = -self._position * cost
-        else:
-            self._holding_cost = 0.0
+        self._holding_cost = holding_cost
 
         self._capital = self._coupon - self._holding_cost
-        self._coupon_income.iloc[inow] = self._coupon
-        self._holding_costs.iloc[inow] = self._holding_cost
+        self._coupon_income_arr[inow] = self._coupon
+        self._holding_costs_arr[inow] = self._holding_cost
 
     @property
     def coupon(self):
@@ -1956,9 +2127,9 @@ class HedgeSecurity(SecurityBase):
         Update security with a given date and optionally, some data.
         This will update price, value, weight, etc.
         """
-        super(HedgeSecurity, self).update(date, data, inow)
+        super().update(date, data, inow)
         self._notl_value = 0.0
-        self._notl_values.iloc[:] = 0.0
+        self._notl_values_arr.fill(0.0)
 
 
 class CouponPayingHedgeSecurity(CouponPayingSecurity):
@@ -1977,12 +2148,12 @@ class CouponPayingHedgeSecurity(CouponPayingSecurity):
         Update security with a given date and optionally, some data.
         This will update price, value, weight, etc.
         """
-        super(CouponPayingHedgeSecurity, self).update(date, data, inow)
+        super().update(date, data, inow)
         self._notl_value = 0.0
-        self._notl_values.iloc[:] = 0.0
+        self._notl_values_arr.fill(0.0)
 
 
-class Algo(object):
+class Algo:
     """
     Algos are used to modularize strategy logic so that strategy logic becomes
     modular, composable, more testable and less error prone. Basically, the
@@ -2014,7 +2185,7 @@ class Algo(object):
         return self._name
 
     def __call__(self, target):
-        raise NotImplementedError("%s not implemented!" % self.name)
+        raise NotImplementedError(f"{self.name} not implemented!")
 
 
 class AlgoStack(Algo):
@@ -2031,7 +2202,7 @@ class AlgoStack(Algo):
     """
 
     def __init__(self, *algos):
-        super(AlgoStack, self).__init__()
+        super().__init__()
         self.algos = algos
         self.check_run_always = any(hasattr(x, "run_always") for x in self.algos)
 
@@ -2051,9 +2222,8 @@ class AlgoStack(Algo):
             for algo in self.algos:
                 if res:
                     res = algo(target)
-                elif hasattr(algo, "run_always"):
-                    if algo.run_always:
-                        algo(target)
+                elif hasattr(algo, "run_always") and algo.run_always:
+                    algo(target)
             return res
 
 
@@ -2087,7 +2257,7 @@ class Strategy(StrategyBase):
     """
 
     def __init__(self, name, algos=None, children=None, parent=None):
-        super(Strategy, self).__init__(name, children=children, parent=parent)
+        super().__init__(name, children=children, parent=parent)
         if algos is None:
             algos = []
         self.stack = AlgoStack(*algos)
@@ -2127,11 +2297,11 @@ class FixedIncomeStrategy(Strategy):
     """
 
     def __init__(self, name, algos=None, children=None):
-        super(FixedIncomeStrategy, self).__init__(name, algos=algos, children=children)
+        super().__init__(name, algos=algos, children=children)
         self._fixed_income = True
 
 
-class CostModel(object):
+class CostModel:
     """
     Nonlinear transaction cost model.
 
@@ -2142,8 +2312,18 @@ class CostModel(object):
     law, Almgren-Chriss, etc.). Commissions / spread / fees are absorbed
     into the model's linear term where applicable.
 
+    For nonzero trades, volume and volatility must be finite and
+    non-negative. Zero volume remains an explicit zero-cost observation.
     Subclasses implement ``cost(q, p, V, sigma) -> float``.
     """
+
+    @cy.locals(V=cy.double, sigma=cy.double)
+    def _validate_inputs(self, V, sigma):
+        """Reject market inputs that cannot produce a valid impact cost."""
+        if not math.isfinite(V) or V < 0.0:
+            raise ValueError("volume must be finite and non-negative")
+        if not math.isfinite(sigma) or sigma < 0.0:
+            raise ValueError("volatility must be finite and non-negative")
 
     @cy.locals(q=cy.double, p=cy.double, V=cy.double, sigma=cy.double)
     def cost(self, q, p, V, sigma):
@@ -2156,7 +2336,7 @@ class SqrtCostModel(CostModel):
 
     Instantaneous impact as a fraction of price is
     ``I(x) = Y * sigma * sqrt(|x| / V)``. Integrating the impact profile
-    over a block trade yields the 2/3 prefactor on the cost:
+    over a block trade yields the 2/3 prefactor on the cost::
 
         cost = (2/3) * Y * sigma * |q| * sqrt(|q| / V) * p
 
@@ -2175,7 +2355,10 @@ class SqrtCostModel(CostModel):
     @cy.locals(q=cy.double, p=cy.double, V=cy.double, sigma=cy.double, abs_q=cy.double)
     def cost(self, q, p, V, sigma):
         abs_q = abs(q)
-        if V <= 0.0 or abs_q == 0.0:
+        if abs_q == 0.0:
+            return 0.0
+        self._validate_inputs(V, sigma)
+        if V == 0.0:
             return 0.0
         return (2.0 / 3.0) * self.Y * sigma * abs_q * (abs_q / V) ** 0.5 * p
 
@@ -2183,6 +2366,8 @@ class SqrtCostModel(CostModel):
 class AlmgrenChrissCostModel(CostModel):
     """
     Almgren-Chriss three-component transaction cost (Almgren & Chriss 2001).
+
+    The total cost is::
 
         cost =   0.5 * alpha * sigma * (|q|/V) * |q| * p   (permanent, triangular)
                + epsilon * |q| * p                         (linear temp: spread/fees)
@@ -2212,7 +2397,10 @@ class AlmgrenChrissCostModel(CostModel):
     @cy.locals(q=cy.double, p=cy.double, V=cy.double, sigma=cy.double, abs_q=cy.double, part=cy.double)
     def cost(self, q, p, V, sigma):
         abs_q = abs(q)
-        if V <= 0.0 or abs_q == 0.0:
+        if abs_q == 0.0:
+            return 0.0
+        self._validate_inputs(V, sigma)
+        if V == 0.0:
             return 0.0
         part = abs_q / V
         return ((0.5 * self.alpha + self.beta) * sigma * part + self.epsilon) * abs_q * p

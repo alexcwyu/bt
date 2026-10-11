@@ -1,6 +1,9 @@
 from __future__ import division
 
 import copy
+import pickle
+import random
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,6 +16,92 @@ from bt.core import FixedIncomeStrategy, HedgeSecurity, FixedIncomeSecurity
 from bt.core import CouponPayingSecurity, CouponPayingHedgeSecurity
 from bt.core import is_zero
 from bt.core import CostModel, SqrtCostModel, AlmgrenChrissCostModel
+
+
+class DeterministicHashString(str):
+    """Provide stable hashes that expose unordered universe filtering."""
+
+    def __hash__(self) -> int:
+        return "AEBDCZ".index(self)
+
+
+@pytest.mark.parametrize("security_type", [bt.Security, CouponPayingSecurity])
+@pytest.mark.parametrize("add_column", [False, True])
+@pytest.mark.parametrize("restore", [lambda node: node, copy.deepcopy, lambda node: pickle.loads(pickle.dumps(node))], ids=["original", "deepcopy", "pickle"])
+def test_data_and_history_stay_current_after_numpy_read(security_type, add_column, restore):
+    dates = pd.date_range("2020-01-01", periods=3)
+    prices = pd.DataFrame({"asset": [100.0, 101.0, 102.0]}, index=dates)
+    strategy = Strategy("strategy", children=[security_type("asset")])
+    strategy.setup(
+        prices,
+        bidoffer=prices * 0.001,
+        coupons=prices * 0.01,
+        cost_long=prices * 0.002,
+    )
+    strategy.adjust(10000.0)
+    strategy.update(dates[0])
+    security = strategy["asset"]
+    security.transact(10)
+    strategy.update(dates[0])
+    original = strategy
+    strategy = restore(strategy)
+    security = strategy["asset"]
+    for node in [strategy, security]:
+        if add_column:
+            node.data["signal"] = 42.0
+        node.data.to_numpy()
+
+    strategy.update(dates[1])
+    for node in [strategy, security]:
+        assert node.values.iloc[-1] == node.value
+        assert node.data.loc[dates[1], "value"] == node.value
+        if add_column:
+            assert (node.data["signal"] == 42.0).all()
+        pd.testing.assert_series_equal(node.values, node.data["value"].loc[:dates[1]])
+        pd.testing.assert_series_equal(node.notional_values, node.data["notional_value"].loc[:dates[1]])
+        pd.testing.assert_series_equal(node.bidoffers_paid, node.data["bidoffer_paid"].loc[:dates[1]])
+    pd.testing.assert_series_equal(strategy.prices, strategy.data["price"].loc[:dates[1]])
+    pd.testing.assert_series_equal(strategy.cash, strategy.data["cash"])
+    pd.testing.assert_series_equal(security.prices, prices["asset"].loc[:dates[1]])
+    if isinstance(security, CouponPayingSecurity):
+        pd.testing.assert_series_equal(security.coupons, security.data["coupon"].loc[:dates[1]])
+        pd.testing.assert_series_equal(security.holding_costs, security.data["holding_cost"].loc[:dates[1]])
+    if strategy is not original:
+        assert original.now == dates[0]
+        assert original.data.loc[dates[1], "value"] == 0.0
+
+
+@pytest.mark.parametrize("node_type", [Strategy, bt.Security, CouponPayingSecurity])
+def test_setup_resets_bidoffer_mode(node_type):
+    dates = pd.date_range("2020-01-01", periods=3)
+    prices = pd.DataFrame({"asset": [100.0, 101.0, 102.0]}, index=dates)
+    node = node_type("asset")
+    for enabled in [True, False, True]:
+        kwargs = {"coupons": prices * 0.01}
+        if enabled:
+            kwargs["bidoffer"] = prices * 0.001
+        node.setup(prices, **kwargs)
+        node.update(dates[0])
+        assert node._bidoffer_set == enabled
+        assert ("bidoffer_paid" in node.data) == enabled
+        if not enabled:
+            with pytest.raises(RuntimeError, match="Bid/offer accounting not turned on"):
+                node.bidoffers_paid
+
+
+@pytest.mark.parametrize("restore", [lambda node: node, copy.deepcopy, lambda node: pickle.loads(pickle.dumps(node))], ids=["original", "deepcopy", "pickle"])
+def test_security_without_universe_prices_preserves_missing_history(restore):
+    dates = pd.date_range("2020-01-01", periods=3)
+    security = bt.Security("asset")
+    security.setup(pd.DataFrame(index=dates), bidoffer=pd.DataFrame(index=dates))
+    security = restore(security)
+    assert security.data[["price", "value", "position", "notional_value"]].isna().all().all()
+
+    security.update(dates[1], {"asset": 100.0})
+    assert security.prices.name == "price"
+    assert security.bidoffers.name == "bidoffer"
+    assert pd.isna(security.prices.iloc[0])
+    assert security.prices.iloc[-1] == 100.0
 
 
 def test_node_tree1():
@@ -321,6 +410,106 @@ def test_strategybase_tree_adjust():
     assert s.flows[dts[0]] == 1000
 
 
+@pytest.mark.parametrize("amount", [np.nan, np.inf, -np.inf])
+@pytest.mark.parametrize("strategy_type", [StrategyBase, FixedIncomeStrategy])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("through_algo", [False, True])
+def test_strategybase_rejects_nonfinite_capital_flow(
+    amount, strategy_type, nested, through_algo
+):
+    dates = pd.date_range("2024-01-01", periods=2)
+    data = pd.DataFrame({"asset": [100.0, 100.0]}, index=dates)
+    children = [strategy_type("leaf")] if nested else []
+    root = strategy_type("root", children=children)
+    root.setup(data)
+    root.adjust(1000.0)
+    root.update(dates[0])
+    root.update(dates[1])
+    root.adjust(0.0)
+    target = root["leaf"] if nested else root
+
+    # Snapshot the whole tree, including ancestor histories and paper portfolios.
+    # The guard must precede fee/flow writes even when the root is already stale.
+    before = pickle.dumps(root)
+    with pytest.raises(ValueError, match="Capital flow amount must be finite"):
+        if through_algo:
+            bt.algos.CapitalFlow(amount)(target)
+        else:
+            target.adjust(amount, update=False, fee=1.0)
+    assert pickle.dumps(root) == before
+
+
+@pytest.mark.parametrize("amount", [100.0, -100.0, 0.0, np.float32(0.5), np.float64(-0.5)])
+def test_strategybase_adjust_propagates_external_flow_to_ancestors(amount):
+    dates = pd.date_range("2024-01-01", periods=2)
+    data = pd.DataFrame({"asset": [100.0, 100.0]}, index=dates)
+    root = StrategyBase(
+        "root",
+        [StrategyBase("child", [StrategyBase("leaf")])],
+    )
+    child = root["child"]
+    leaf = child["leaf"]
+    root.setup(data)
+    root.adjust(1000.0)
+    root.update(dates[0])
+    root.update(dates[1])
+
+    leaf.adjust(amount)
+    root.update(dates[1])
+
+    # Every value-owning ancestor needs the external flow in its return denominator.
+    for strategy in (root, child, leaf):
+        assert strategy.flows.loc[dates[1]] == amount
+        assert strategy.price == pytest.approx(100.0)
+    assert root.value == pytest.approx(1000.0 + amount)
+    assert child.value == pytest.approx(amount)
+    assert leaf.value == pytest.approx(amount)
+
+
+def test_fixed_income_adjust_propagates_external_flow_to_ancestors():
+    dates = pd.date_range("2024-01-01", periods=2)
+    data = pd.DataFrame({"asset": [100.0, 100.0]}, index=dates)
+    root = FixedIncomeStrategy(
+        "root",
+        children=[FixedIncomeStrategy("child")],
+    )
+    root.setup(data)
+    child = root["child"]
+    root.update(dates[0])
+    root.update(dates[1])
+
+    child.adjust(100.0)
+    root.update(dates[1])
+
+    # Additive P&L must also remain neutral when the flow enters a child sleeve.
+    assert root.flows.loc[dates[1]] == 100.0
+    assert child.flows.loc[dates[1]] == 100.0
+    assert root.price == pytest.approx(100.0)
+    assert child.price == pytest.approx(100.0)
+
+
+def test_strategybase_adjust_does_not_propagate_non_flow():
+    dates = pd.date_range("2024-01-01", periods=2)
+    data = pd.DataFrame({"asset": [100.0, 100.0]}, index=dates)
+    root = StrategyBase("root", [StrategyBase("child")])
+    root.setup(data)
+    child = root["child"]
+    root.adjust(1000.0)
+    root.update(dates[0])
+    child.allocate(500.0)
+    root.update(dates[0])
+    root.update(dates[1])
+
+    child.adjust(100.0, flow=False)
+    root.update(dates[1])
+
+    # A non-flow change in a sleeve remains genuine performance at the root.
+    assert child.flows.loc[dates[1]] == 0.0
+    assert root.flows.loc[dates[1]] == 0.0
+    assert root.value == pytest.approx(1100.0)
+    assert root.price == pytest.approx(110.0)
+
+
 def test_strategybase_tree_update():
     c1 = SecurityBase("c1")
     c2 = SecurityBase("c2")
@@ -385,6 +574,88 @@ def test_update_fails_if_price_is_nan_and_position_open():
     c1._position = 0
     c1.update(dts[i], data.loc[dts[i]])
     assert c1._value == 0
+
+
+# Cross both price-ingestion paths with each distinct rejection mechanism.
+@pytest.mark.parametrize(
+    ("invalid_price", "position", "multiplier", "message"),
+    [
+        pytest.param(np.inf, 0.0, 1.0, "Price is infinite", id="positive-infinity-closed"),
+        pytest.param(-np.inf, 100.0, 1.0, "Price is infinite", id="negative-infinity-long"),
+        pytest.param(np.inf, -100.0, 1.0, "Price is infinite", id="positive-infinity-short"),
+        pytest.param(np.nan, 100.0, 1.0, "Position is open", id="nan-long"),
+        pytest.param(np.nan, -100.0, 1.0, "Position is open", id="nan-short"),
+        pytest.param(np.finfo(float).max, 1.0, 2.0, "non-finite value", id="overflow-long"),
+        pytest.param(np.finfo(float).max, -1.0, 2.0, "non-finite value", id="overflow-short"),
+    ],
+)
+@pytest.mark.parametrize("price_source", ["setup", "update"])
+def test_update_rejects_nonfinite_price_or_value_before_state_mutation(
+    invalid_price,
+    position,
+    multiplier,
+    message,
+    price_source,
+):
+    dates = pd.date_range("2010-01-01", periods=2)
+    if price_source == "setup":
+        universe = pd.DataFrame({"asset": [100.0, invalid_price]}, index=dates)
+        updates = [None, None]
+    else:
+        universe = pd.DataFrame(index=dates)
+        updates = [{"asset": 100.0}, {"asset": invalid_price}]
+
+    security = SecurityBase("asset", multiplier=multiplier)
+    security.setup(universe)
+    security._position = position
+    security.update(dates[0], updates[0])
+
+    # Snapshot every update-owned state surface to prove rejection is atomic.
+    state = (
+        security.now,
+        security._price,
+        security._value,
+        security._notl_value,
+        security._last_pos,
+        security._needupdate,
+        security.data.copy(deep=True),
+        security._prices.copy(deep=True),
+    )
+
+    with pytest.raises(ValueError, match=message), np.errstate(all="raise"):
+        security.update(dates[1], updates[1])
+
+    assert security.now == state[0]
+    assert security._price == state[1]
+    assert security._value == state[2]
+    assert security._notl_value == state[3]
+    assert security._last_pos == state[4]
+    assert security._needupdate == state[5]
+    pd.testing.assert_frame_equal(security.data, state[6])
+    pd.testing.assert_series_equal(security._prices, state[7])
+
+
+# Preserve the established missing-price behavior when no position is held.
+@pytest.mark.parametrize("price_source", ["setup", "update"])
+def test_update_accepts_nan_price_for_zero_position(price_source):
+    dates = pd.date_range("2010-01-01", periods=2)
+    if price_source == "setup":
+        universe = pd.DataFrame({"asset": [100.0, np.nan]}, index=dates)
+        updates = [None, None]
+    else:
+        universe = pd.DataFrame(index=dates)
+        updates = [{"asset": 100.0}, {"asset": np.nan}]
+
+    security = SecurityBase("asset")
+    security.setup(universe)
+    security.update(dates[0], updates[0])
+    security.update(dates[1], updates[1])
+
+    assert security.now == dates[1]
+    assert np.isnan(security._price)
+    assert security._value == 0.0
+    assert security._positions.loc[dates[1]] == 0.0
+    assert np.isnan(security._prices.loc[dates[1]])
 
 
 def test_strategybase_tree_allocate():
@@ -732,6 +1003,39 @@ def test_strategybase_close():
     assert c1.position == 0
     assert c1.value == 0
     assert s.value == 1000
+
+
+@pytest.mark.parametrize("operation", ["close", "flatten"])
+@pytest.mark.parametrize("amount", [1000.0, -1000.0])
+def test_strategybase_closes_zero_price_positions(operation, amount):
+    dates = pd.date_range("2010-01-01", periods=2)
+    data = pd.DataFrame({"asset": [100.0, 0.0]}, index=dates)
+    strategy = StrategyBase("strategy")
+    strategy.setup(data)
+    strategy.update(dates[0])
+    strategy.adjust(1000.0)
+    strategy.allocate(amount, "asset")
+    strategy.update(dates[0])
+    strategy.update(dates[1])
+    security = strategy["asset"]
+    initial_position = security.position
+    initial_cash = strategy.capital
+    initial_value = strategy.value
+
+    # Both public close operations must use the live quantity when value is zero.
+    if operation == "close":
+        strategy.close("asset")
+    else:
+        strategy.flatten()
+    strategy.update(dates[1])
+
+    transactions = strategy.get_transactions()
+    assert security.position == 0.0
+    assert security.value == 0.0
+    assert strategy.capital == initial_cash
+    assert strategy.value == initial_value
+    assert transactions.iloc[-1]["quantity"] == -initial_position
+    assert transactions.iloc[-1]["price"] == 0.0
 
 
 def test_strategybase_flatten():
@@ -1937,6 +2241,44 @@ def test_set_commissions():
     assert s.capital == 999
 
 
+def test_dynamic_strategy_inherits_legacy_commissions():
+    def inherited_commission(quantity, price):
+        return 7.0
+
+    def child_commission(quantity, price):
+        return 3.0
+
+    parent = Strategy("parent")
+    parent.set_commissions(inherited_commission)
+
+    # Attachment inherits through the complete preconstructed subtree.
+    child = Strategy(
+        "child",
+        children=[Strategy("nested", children=["asset"])],
+        parent=parent,
+    )
+    nested = child["nested"]
+    assert child.commission_fn is inherited_commission
+    assert nested.commission_fn is inherited_commission
+
+    # A child override made after attachment remains authoritative through setup.
+    child.set_commissions(child_commission)
+    prices = pd.DataFrame(
+        {"asset": [100.0]},
+        index=pd.date_range("2020-01-01", periods=1),
+    )
+    parent.setup(prices)
+    assert child.commission_fn is child_commission
+    assert child._paper.commission_fn is child_commission
+    assert nested.commission_fn is child_commission
+
+    # With a default parent, each dynamic child retains its own bound default.
+    default_parent = Strategy("default_parent")
+    default_child = Strategy("default_child", parent=default_parent)
+    assert default_child.commission_fn.__func__ is StrategyBase._dflt_comm_fn
+    assert default_child.commission_fn.__self__ is default_child
+
+
 def test_strategy_tree_proper_return_calcs():
     s1 = StrategyBase("s1")
     s2 = StrategyBase("s2")
@@ -1964,6 +2306,7 @@ def test_strategy_tree_proper_return_calcs():
     assert m.price == 100
     assert s1.value == 0
     assert s2.value == 0
+    assert m.flows.loc[dts[0]] == 1000
 
     # now allocate directly to child
     s1.allocate(500)
@@ -1975,6 +2318,8 @@ def test_strategy_tree_proper_return_calcs():
     assert s1.weight == pytest.approx(500.0 / 1000)
     assert s1.price == 100
     assert s2.weight == 0
+    assert m.flows.loc[dts[0]] == 1000
+    assert s1.flows.loc[dts[0]] == 500
 
     # allocate to child2 via parent method
     m.allocate(500, "s2")
@@ -1988,6 +2333,8 @@ def test_strategy_tree_proper_return_calcs():
     assert s2.value == 500
     assert s2.weight == pytest.approx(500.0 / 1000)
     assert s2.price == 100
+    assert m.flows.loc[dts[0]] == 1000
+    assert s2.flows.loc[dts[0]] == 500
 
     # now allocate and incur commission fee
     s1.allocate(500, "c1")
@@ -2054,7 +2401,123 @@ def test_strategy_tree_proper_universes():
     assert len(parent._strat_children) == 2
 
 
-def test_strategy_tree_paper():
+@pytest.mark.parametrize("children, columns", [(None, ["a", "b", "c"]), ([], ["a", "b", "c"]), (["b", "a", "missing"], ["a", "b"]), (["missing"], [])])
+def test_strategy_setup_owns_retained_universe(children, columns):
+    dates = pd.date_range("2020-01-01", periods=2, name="date")
+    data = pd.DataFrame({"a": [100.0, np.nan], "b": pd.array([2, None], dtype="Int64"), "c": [True, False]}, index=dates)
+    data.columns.name = "asset"
+    strategy = Strategy("strategy", children=children)
+    strategy.setup(data)
+    expected = data[columns].copy()
+
+    pd.testing.assert_frame_equal(strategy._universe, expected)
+    # Keep the intentional reconstruction reference while isolating retained prices and axes.
+    assert strategy._original_data is data
+    data.iloc[0, 0] = 999.0
+    data.index.name = "changed date"
+    data.columns.name = "changed asset"
+    pd.testing.assert_frame_equal(strategy._universe, expected)
+
+    # Isolation must also hold in the other direction, including the no-filter path.
+    changed_source = data.copy()
+    if "a" in columns:
+        strategy._universe.iloc[0, 0] = 123.0
+    strategy._universe.index.name = "owned date"
+    strategy._universe.columns.name = "owned asset"
+    pd.testing.assert_frame_equal(data, changed_source)
+
+
+def test_nested_and_dynamic_setup_own_real_and_paper_universes():
+    dates = pd.date_range("2020-01-01", periods=2)
+    data = pd.DataFrame({"a": [100.0, 101.0], "b": [200.0, 202.0]}, index=dates)
+    parent = Strategy("parent", children=[Strategy("initial", children=["b"])])
+    parent.setup(data)
+    dynamic = Strategy("dynamic", children=["a"], parent=parent)
+    dynamic.setup_from_parent()
+    initial = parent["initial"]
+    nodes = [initial, initial._paper, dynamic, dynamic._paper]
+    expected = [data[[name]].copy() for name in ["b", "b", "a", "a"]]
+
+    data.iloc[0] = [-1.0, -2.0]
+    for node, frame in zip(nodes, expected):
+        pd.testing.assert_frame_equal(node._universe, frame)
+        assert node._original_data is data
+
+    # A real sleeve's mutation must not leak into its independently rooted paper portfolio.
+    initial._universe.iloc[0, 0] = 777.0
+    dynamic._universe.iloc[0, 0] = 888.0
+    pd.testing.assert_frame_equal(initial._paper._universe, expected[1])
+    pd.testing.assert_frame_equal(dynamic._paper._universe, expected[3])
+    assert parent._universe.columns.tolist() == ["initial", "dynamic"]
+    assert parent._universe.isna().all().all()
+
+
+def test_explicit_children_preserve_universe_order_for_seeded_results():
+    """Keep seeded selection and results stable after restricting the universe."""
+
+    dates = pd.date_range("2020-01-01", periods=2)
+    tickers = [DeterministicHashString(name) for name in "ABCDE"]
+    prices = pd.DataFrame(
+        [[100.0] * 5, [110.0, 120.0, 130.0, 140.0, 150.0]],
+        index=dates,
+        columns=pd.Index(tickers, dtype=object),
+    )
+    children = list(reversed(tickers)) + [DeterministicHashString("Z")]
+    strategy = Strategy(
+        "seeded",
+        [
+            bt.algos.RunOnce(),
+            bt.algos.SelectAll(),
+            bt.algos.SelectRandomly(n=2),
+            bt.algos.WeighEqually(),
+            bt.algos.Rebalance(),
+        ],
+        children=children,
+    )
+    backtest = bt.Backtest(
+        strategy,
+        prices,
+        initial_capital=1000.0,
+        integer_positions=False,
+        progress_bar=False,
+    )
+
+    # Preserve the global generator for other tests while exercising the documented seed path.
+    random_state = random.getstate()
+    random.seed(271828)
+    try:
+        backtest.run()
+    finally:
+        random.setstate(random_state)
+
+    strategy = backtest.strategy
+    # B and A return 20% and 10%, so their equal-weighted index must finish at 115.
+    assert strategy.prices.iloc[-1] == pytest.approx(115.0)
+    assert strategy._universe.columns.tolist() == tickers
+
+
+def test_explicit_children_preserve_universe_order_with_strategy_child():
+    """Append Strategy children after source-ordered security columns."""
+
+    tickers = [DeterministicHashString(name) for name in "ABCDE"]
+    data = pd.DataFrame(
+        [[1.0] * 5],
+        index=pd.date_range("2020-01-01", periods=1),
+        columns=pd.Index(tickers, dtype=object),
+    )
+    child = Strategy("child")
+    parent = Strategy(
+        "parent",
+        children=[tickers[4], child, tickers[2], tickers[0], DeterministicHashString("Z")],
+    )
+
+    parent.setup(data)
+
+    assert parent._universe.columns.tolist() == [tickers[0], tickers[2], tickers[4], "child"]
+
+
+@pytest.mark.parametrize("restore", [lambda node: node, copy.deepcopy, lambda node: pickle.loads(pickle.dumps(node))], ids=["original", "deepcopy", "pickle"])
+def test_strategy_tree_paper(restore):
     dts = pd.date_range("2010-01-01", periods=3)
     data = pd.DataFrame(index=dts, columns=["a"], data=100.0)
     data.loc[dts[1], "a"] = 101
@@ -2075,6 +2538,8 @@ def test_strategy_tree_paper():
     m.setup(data)
     m.update(dts[0])
     m.run()
+    m = restore(m)
+    s = m["s"]
 
     assert m.price == 100
     assert s.price == 100
@@ -2096,6 +2561,131 @@ def test_strategy_tree_paper():
     assert m.value == 0
     assert s.value == 0
     assert np.allclose(s.price, 100.0 * (102 / 101.0))
+    assert s.prices.iloc[-1] == s.price
+    assert s._paper.prices.iloc[-1] == s._paper.price
+
+
+@pytest.mark.parametrize("missing_first_price", [False, True])
+def test_direct_first_update_runs_paper_algos(missing_first_price):
+    dates = pd.date_range("2024-01-01", periods=2)
+    prices = pd.DataFrame({"a": [np.nan if missing_first_price else 100.0, 110.0]}, index=dates)
+    child = Strategy("child", [bt.algos.RunOnce()])
+    parent = Strategy("parent", children=[child])
+    parent.setup(prices)
+    parent.update(dates[0])
+    # Core cannot infer Backtest's reference row from position or missingness.
+    assert parent["child"]._paper.stack.algos[0].has_run
+
+
+def test_paper_bootstrap_marker_clears_after_update_failure():
+    dates = pd.date_range("2024-01-01", periods=2)
+    parent = Strategy("parent", children=[Strategy("child")])
+    parent.setup(pd.DataFrame({"a": 100.0}, index=dates))
+    parent._in_bootstrap = True
+    paper = parent["child"]._paper
+    with (
+        mock.patch.object(paper, "update", side_effect=ValueError("paper update failed")),
+        pytest.raises(ValueError, match="paper update failed"),
+    ):
+        parent.update(dates[0])
+    assert paper._in_bootstrap is False
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_paper_descendants_share_their_own_root(nested):
+    child = Strategy("child", children=[bt.Security("a")])
+    if nested:
+        child = Strategy("sleeve", children=[child])
+    parent = Strategy("parent", children=[child])
+    parent.setup(pd.DataFrame({"a": [100.0, 110.0]}, index=pd.date_range("2024-01-01", periods=2)))
+
+    def check_roots(tree):
+        # Correct values alone can hide descendants rooted in a copied ancestor.
+        assert all(node.root is tree for node in tree.members)
+        for node in tree.members:
+            if isinstance(node, StrategyBase) and node._paper_trade:
+                check_roots(node._paper)
+
+    check_roots(parent)
+
+
+@pytest.mark.parametrize("existing_column", [False, True], ids=["new-column", "existing-column"])
+def test_dynamic_strategy_universe_cache(existing_column):
+    dates = pd.date_range("2020-01-01", periods=3)
+    data = pd.DataFrame({"a": [100.0, 100.0, 105.0]}, index=dates)
+    if existing_column:
+        data["sleeve"] = 37.0
+    original = data.copy()
+    parent = Strategy("parent")
+    parent.setup(data)
+    parent.adjust(10000.0)
+    parent.update(dates[1])
+    cached = parent.universe
+
+    sleeve = Strategy("sleeve", children=["a"], parent=parent)
+    sleeve.setup_from_parent()
+    expected = data.loc[: dates[1]].copy()
+    if not existing_column:
+        expected["sleeve"] = np.nan
+    # A read between registration and pricing must not leave a stale placeholder.
+    registered = parent.universe
+    pd.testing.assert_frame_equal(registered, expected)
+    if existing_column:
+        assert registered is cached
+    bt.algos.SelectAll()(parent)
+    assert parent.temp["selected"] == (["a", "sleeve"] if existing_column else ["a"])
+
+    sleeve.update(parent.now)
+    parent.allocate(1000.0, "sleeve")
+    parent.update(parent.now)
+    expected.loc[dates[1], "sleeve"] = 100.0
+    pd.testing.assert_frame_equal(parent.universe, expected)
+    bt.algos.SelectAll()(parent)
+    assert parent.temp["selected"] == ["a", "sleeve"]
+    assert parent.universe is parent.universe
+    assert parent.capital == 9000.0
+    assert sleeve.value == 1000.0
+    assert parent.value == parent.capital + sleeve.value == 10000.0
+
+    parent.update(dates[2])
+    assert parent.universe.index.equals(dates)
+    assert parent.universe.columns.tolist() == ["a", "sleeve"]
+    pd.testing.assert_frame_equal(data, original)
+
+
+def test_strategy_universe_cache_between_price_publications():
+    class ObservingStrategy(Strategy):
+        @property
+        def price(self):
+            if getattr(self, "observations", None) is not None:
+                self.observations.append(self.parent.universe.loc[self.now].tolist())
+            return super().price
+
+    dates = pd.date_range("2020-01-01", periods=3)
+    data = pd.DataFrame({"a": 100.0}, index=dates)
+    original = data.copy()
+    parent = Strategy("parent", children=[Strategy("first"), ObservingStrategy("second")])
+    parent.setup(data)
+    parent.adjust(10000.0)
+    parent.update(dates[1])
+    first, second = parent["first"], parent["second"]
+    assert parent.universe.loc[dates[1]].tolist() == [100.0, 100.0]
+
+    # Non-flow losses on the million-unit paper portfolios imply prices 99 and 98.
+    first._paper.adjust(-10000.0, flow=False)
+    second._paper.adjust(-20000.0, flow=False)
+    first._paper.update(dates[1])
+    second._paper.update(dates[1])
+    second.observations = []
+    parent.update(dates[1])
+
+    # Publication is sequential: the getter sees the first write before the second.
+    assert second.observations == [[99.0, 100.0]]
+    expected = pd.DataFrame({"first": [np.nan, 99.0], "second": [np.nan, 98.0]}, index=dates[:2])
+    pd.testing.assert_frame_equal(parent.universe, expected)
+    assert parent.universe is parent.universe
+    assert parent.value == parent.capital == 10000.0
+    pd.testing.assert_frame_equal(data, original)
 
 
 def test_dynamic_strategy():
@@ -2399,6 +2989,32 @@ def test_fixed_commissions():
 
     assert c2.value == -200
     assert s.capital == 198 + 199 - 101 + 499 + 199
+
+
+def test_integer_positions_with_nonlinear_commissions():
+    c = SecurityBase("c")
+    s = StrategyBase("s", [c])
+
+    def commissions(q, p):
+        return max(0.35, min(abs(q) * 0.0035, abs(q) * p * 0.01))
+
+    s.set_commissions(commissions)
+    c = s["c"]
+
+    dts = pd.date_range("2010-01-01", periods=1)
+    data = pd.DataFrame(index=dts, columns=["c"], data=1.0)
+    s.setup(data)
+    s.update(dts[0], data.loc[dts[0]])
+    s.adjust(1000)
+
+    # Rebalancing from a short position used to skip the affordable quantity
+    # of 285 and raise a "commission fn is not smooth" RuntimeError.
+    c._position = -100
+    c.update(dts[0], data.loc[dts[0]])
+    c.allocate(286)
+
+    assert c.position == 185
+    assert s.capital == pytest.approx(1000 - 285.9975)
 
 
 def test_degenerate_shorting():
@@ -2768,6 +3384,87 @@ def test_securitybase_transact():
     assert np.isclose(s.outlays[c1.name].iloc[0], 3 * amount, rtol=0.0)
 
 
+def test_securitybase_transaction_accepts_finite_cost_components():
+    dates = pd.date_range("2026-01-01", periods=1)
+    security = SecurityBase("asset")
+    strategy = StrategyBase("strategy", [security])
+    strategy.setup(pd.DataFrame({"asset": [100.0]}, index=dates), bidoffer=pd.DataFrame({"asset": [0.0]}, index=dates))
+    strategy.set_commissions(lambda quantity, price: 1.0)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    security = strategy["asset"]
+
+    security.transact(1.0)
+
+    assert security.position == 1.0
+    assert security._outlay == 100.0
+    assert security._bidoffer_paid == 0.0
+    assert strategy.capital == 899.0
+    assert strategy._last_fee == 1.0
+
+
+@pytest.mark.parametrize(
+    ("commission", "bidoffer", "trade_price", "quantity"),
+    [
+        pytest.param(np.nan, 0.0, None, 1.0, id="nan-commission"),
+        pytest.param(0.0, np.inf, None, 1.0, id="infinite-bidoffer"),
+        pytest.param(0.0, 0.0, np.inf, 1.0, id="infinite-custom-price"),
+        pytest.param(
+            np.finfo(float).max,
+            0.0,
+            None,
+            np.finfo(float).max / 100.0,
+            id="finite-component-overflow",
+        ),
+    ],
+)
+def test_securitybase_transaction_rejects_nonfinite_cost_before_state_mutation(
+    commission,
+    bidoffer,
+    trade_price,
+    quantity,
+):
+    dates = pd.date_range("2026-01-01", periods=1)
+    security = SecurityBase("asset")
+    strategy = StrategyBase("strategy", [security])
+    strategy.setup(
+        pd.DataFrame({"asset": [100.0]}, index=dates),
+        bidoffer=pd.DataFrame({"asset": [bidoffer]}, index=dates),
+    )
+    strategy.set_commissions(lambda q, p: commission)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    strategy.stale = False
+    security = strategy["asset"]
+    state = (
+        security._position,
+        security._outlay,
+        security._bidoffer_paid,
+        security._needupdate,
+        strategy._capital,
+        strategy._last_fee,
+        strategy._net_flows,
+        strategy.stale,
+        security.data.copy(deep=True),
+        strategy.data.copy(deep=True),
+    )
+
+    # The leaf owns every mutation below; rejection must preserve all of them.
+    with pytest.raises(ValueError, match="Transaction outlay and costs must be finite"), np.errstate(all="ignore"):
+        security.transact(quantity, price=trade_price)
+
+    assert security._position == state[0]
+    assert security._outlay == state[1]
+    assert security._bidoffer_paid == state[2]
+    assert security._needupdate == state[3]
+    assert strategy._capital == state[4]
+    assert strategy._last_fee == state[5]
+    assert strategy._net_flows == state[6]
+    assert strategy.stale is state[7]
+    pd.testing.assert_frame_equal(security.data, state[8])
+    pd.testing.assert_frame_equal(strategy.data, state[9])
+
+
 def test_security_setup_positions():
     c1 = SecurityBase("c1")
     c2 = SecurityBase("c2")
@@ -2873,6 +3570,35 @@ def test_couponpayingsecurity_setup_costs():
     assert c2.prices.iloc[0] == 95
 
 
+@pytest.mark.parametrize("cost_name", ["cost_long", "cost_short"])
+@pytest.mark.parametrize("preconfigured", [False, True], ids=["fresh", "configured"])
+def test_couponpayingsecurity_rejects_misaligned_holding_cost_index(cost_name: str, preconfigured: bool):
+    dts = pd.date_range("2010-01-01", periods=3)
+    data = pd.DataFrame(index=dts, columns=["c1"], data=100.0)
+    coupons = pd.DataFrame(index=dts, columns=["c1"], data=0.0)
+    aligned_cost = pd.DataFrame(index=dts, columns=["c1"], data=1.0)
+
+    # Keep both cost inputs present while reversing only the branch under test.
+    reversed_cost = pd.DataFrame(index=dts[::-1], columns=["c1"], data=[23.0, 7.0, 1.0])
+    costs = {"cost_long": aligned_cost, "cost_short": aligned_cost}
+    costs[cost_name] = reversed_cost
+    security = CouponPayingSecurity("c1")
+    if preconfigured:
+        security.setup(
+            data,
+            coupons=coupons,
+            cost_long=aligned_cost,
+            cost_short=aligned_cost,
+        )
+    state_before_setup = security.__dict__.copy()
+
+    # Either cost input must be rejected before setup installs any partial state.
+    with pytest.raises(ValueError, match=f"Index of {cost_name} must match universe data"):
+        security.setup(data, coupons=coupons, **costs)
+
+    assert security.__dict__ == state_before_setup
+
+
 def test_couponpayingsecurity_carry():
     c1 = CouponPayingSecurity("c1")
     s = StrategyBase("p", [c1])
@@ -2931,6 +3657,462 @@ def test_couponpayingsecurity_carry():
     assert c1.holding_cost == pytest.approx(50.0)
     assert len(c1.holding_costs) == 2
     assert c1.holding_costs.iloc[1] == pytest.approx(50.0)
+
+
+def _coupon_update_case(position, coupon, nested=False, price=100.0):
+    """Build a coupon security with one prospective coupon observation."""
+    dates = pd.date_range("2010-01-01", periods=3)
+    prices = pd.DataFrame({"c1": [price, price + 1.0, price + 2.0]}, index=dates)
+    coupons = pd.DataFrame({"c1": [0.0, coupon, 0.0]}, index=dates)
+    security = CouponPayingSecurity("c1")
+    if nested:
+        strategy = StrategyBase("p", [StrategyBase("child", [security])])
+    else:
+        strategy = StrategyBase("p", [security])
+    strategy.setup(prices, coupons=coupons)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    if nested:
+        strategy.allocate(1_000.0, child="child")
+    security = strategy.securities[0]
+    security.transact(position)
+    strategy.update(dates[0])
+    return dates, strategy, security
+
+
+@pytest.mark.parametrize(
+    ("position", "coupon", "price"),
+    [
+        pytest.param(2.0, np.nan, 100.0, id="long-nan"),
+        pytest.param(-2.0, np.inf, 100.0, id="short-infinity"),
+        pytest.param(2.0, pd.NA, 100.0, id="long-nullable"),
+        pytest.param(1e308, 1e308, 0.0, id="finite-overflow"),
+    ],
+)
+def test_couponpayingsecurity_rejects_nonfinite_coupon_before_state_mutation(position, coupon, price):
+    dates, _, security = _coupon_update_case(position, coupon, price=price)
+
+    # Snapshot every surface owned by the first-mutation operation.
+    state = (
+        security.now,
+        security._price,
+        security._value,
+        security._notl_value,
+        security._last_pos,
+        security._needupdate,
+        security._coupon,
+        security._holding_cost,
+        security._capital,
+        security.data.copy(deep=True),
+        security._prices.copy(deep=True),
+    )
+
+    with pytest.raises(ValueError, match="Coupon payment must be finite"), np.errstate(all="raise"):
+        security.update(dates[1])
+
+    assert security.now == state[0]
+    assert security._price == state[1]
+    assert security._value == state[2]
+    assert security._notl_value == state[3]
+    assert security._last_pos == state[4]
+    assert security._needupdate == state[5]
+    assert security._coupon == state[6]
+    assert security._holding_cost == state[7]
+    assert security._capital == state[8]
+    pd.testing.assert_frame_equal(security.data, state[9])
+    pd.testing.assert_series_equal(security._prices, state[10])
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["flat", "nested"])
+def test_strategy_update_rejects_nonfinite_coupon_without_contamination(nested):
+    dates, strategy, security = _coupon_update_case(2.0, np.nan, nested=nested)
+    strategy_nodes = [node for node in strategy.members if isinstance(node, StrategyBase)]
+    strategy.stale = True
+    root_stale = strategy.stale
+    strategy_state = [
+        (
+            node.now,
+            node._value,
+            node._price,
+            node._last_value,
+            node._last_price,
+            node._last_notl_value,
+            node._net_flows,
+            node._last_fee,
+            node._capital,
+            node.data.copy(deep=True),
+        )
+        for node in strategy_nodes
+    ]
+    security_data = security.data.copy(deep=True)
+
+    # The caller must reject before either its own or the Security's clock advances.
+    with pytest.raises(ValueError, match="Coupon payment must be finite"), np.errstate(all="raise"):
+        strategy.update(dates[1])
+
+    assert strategy.stale is root_stale
+    for node, state in zip(strategy_nodes, strategy_state, strict=True):
+        assert node.now == state[0]
+        assert node._value == state[1]
+        assert node._price == state[2]
+        assert node._last_value == state[3]
+        assert node._last_price == state[4]
+        assert node._last_notl_value == state[5]
+        assert node._net_flows == state[6]
+        assert node._last_fee == state[7]
+        assert node._capital == state[8]
+        pd.testing.assert_frame_equal(node.data, state[9])
+    pd.testing.assert_frame_equal(security.data, security_data)
+
+    # Correcting the same observation must permit a retry with the original position.
+    security._coupons.loc[dates[1]] = 1.0
+    strategy.update(dates[1])
+    assert security.coupon == pytest.approx(2.0)
+    assert np.isfinite(security.data.loc[dates[1]]).all()
+    assert np.isfinite(strategy.data.loc[dates[1]]).all()
+
+    strategy.update(dates[2])
+    assert np.isfinite(strategy.prices).all()
+    assert np.isfinite(strategy.prices.pct_change().dropna()).all()
+
+
+def test_strategy_update_preflights_coupon_on_paper_portfolio():
+    dates = pd.date_range("2010-01-01", periods=3)
+    prices = pd.DataFrame({"asset": 100.0}, index=dates)
+    coupons = pd.DataFrame({"asset": [0.0, np.nan, 0.0]}, index=dates)
+    child = Strategy(
+        "child",
+        [bt.algos.RunOnce(), bt.algos.WeighSpecified(asset=1.0), bt.algos.Rebalance()],
+        children=[CouponPayingSecurity("asset", fixed_income=False)],
+    )
+    root = Strategy("root", children=[child])
+    root.setup(prices, coupons=coupons)
+    root.adjust(1_000.0)
+    root.update(dates[0])
+    child = root["child"]
+    nodes = root.members + child._paper.members
+    state = [(node.now, node._capital, node._value, node.data.copy(deep=True)) for node in nodes]
+
+    # The paper position is the only active consumer of the missing coupon.
+    assert child["asset"].position == 0.0
+    assert child._paper["asset"].position > 0.0
+    with pytest.raises(ValueError, match="Coupon payment must be finite"):
+        root.update(dates[1])
+
+    for node, previous in zip(nodes, state, strict=True):
+        assert (node.now, node._capital, node._value) == previous[:3]
+        pd.testing.assert_frame_equal(node.data, previous[3])
+
+    child._paper["asset"]._coupons.loc[dates[1]] = 0.25
+    root.update(dates[1])
+    assert child._paper["asset"].coupon == pytest.approx(child._paper["asset"].position * 0.25)
+    assert np.isfinite(root.data.loc[dates[1]]).all()
+
+
+def test_strategy_update_preflights_all_coupons_before_updating_a_sibling():
+    dates = pd.date_range("2010-01-01", periods=2)
+    prices = pd.DataFrame({"first": 100.0, "second": 100.0}, index=dates)
+    coupons = pd.DataFrame({"first": [0.0, 0.25], "second": [0.0, np.nan]}, index=dates)
+    strategy = StrategyBase(
+        "p",
+        [CouponPayingSecurity("first"), CouponPayingSecurity("second")],
+    )
+    strategy.setup(prices, coupons=coupons)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    for security in strategy.securities:
+        security.transact(1.0)
+    strategy.update(dates[0])
+    state = [(node.now, node._capital, node.data.copy(deep=True)) for node in strategy.members]
+
+    # A bad later sibling must be found before the valid first child pays its coupon.
+    with pytest.raises(ValueError, match="Coupon payment must be finite"), np.errstate(all="raise"):
+        strategy.update(dates[1])
+
+    for node, previous in zip(strategy.members, state, strict=True):
+        assert node.now == previous[0]
+        assert node._capital == previous[1]
+        pd.testing.assert_frame_equal(node.data, previous[2])
+
+    strategy["second"]._coupons.loc[dates[1]] = 0.5
+    strategy.update(dates[1])
+    assert strategy["first"].coupon == pytest.approx(0.25)
+    assert strategy["second"].coupon == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("coupon", [np.nan, pd.NA, np.inf, -np.inf])
+def test_couponpayingsecurity_ignores_unapplied_nonfinite_coupon(coupon):
+    dates, _, security = _coupon_update_case(0.0, coupon)
+
+    # With no position, no coupon arithmetic should consume the observation.
+    with np.errstate(all="raise"):
+        security.update(dates[1])
+
+    assert security.coupon == pytest.approx(0.0)
+    assert security.coupons.loc[dates[1]] == pytest.approx(0.0)
+    assert security._capital == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("direction", [1.0, -1.0], ids=["long", "short"])
+@pytest.mark.parametrize("coupon", [1e17, -1e17], ids=["positive-coupon", "negative-coupon"])
+def test_couponpayingsecurity_preserves_finite_coupon_on_small_position(direction, coupon):
+    dates = pd.date_range("2010-01-01", periods=3)
+    prices = pd.DataFrame({"asset": 1e17}, index=dates)
+    coupons = pd.DataFrame({"asset": [0.0, coupon, 0.0]}, index=dates)
+    strategy = StrategyBase("p", [CouponPayingSecurity("asset", fixed_income=False)])
+    strategy.setup(prices, coupons=coupons)
+    strategy.adjust(1000.0)
+    strategy.update(dates[0])
+    security = strategy["asset"]
+
+    # Two actionable trades can leave a nonzero position below the zero tolerance.
+    security.transact(direction * 1e-15)
+    strategy.update(dates[0])
+    security.transact(direction * -9.5e-16)
+    strategy.update(dates[0])
+    assert 0.0 < abs(security.position) < 1e-16
+    expected_payment = security.position * coupon
+    before_capital = strategy.capital
+
+    strategy.update(dates[1])
+    assert security.coupon == expected_payment
+    assert security.coupons.loc[dates[1]] == expected_payment
+    assert security._capital == expected_payment
+    strategy.update(dates[2])
+    assert strategy.capital == before_capital + expected_payment
+
+
+def _holding_cost_update_case(position, cost_long, cost_short, price=100.0, nested=False):
+    """Build an open coupon security with a prospective carrying-cost observation."""
+    dates = pd.date_range("2010-01-01", periods=3)
+    prices = pd.DataFrame({"c1": [price, price, price]}, index=dates)
+    coupons = pd.DataFrame({"c1": [0.0, 0.0, 0.0]}, index=dates)
+    costs = {
+        "cost_long": pd.DataFrame({"c1": [0.0, cost_long, 0.0]}, index=dates),
+        "cost_short": pd.DataFrame({"c1": [0.0, cost_short, 0.0]}, index=dates),
+    }
+    security = CouponPayingSecurity("c1")
+    if nested:
+        strategy = StrategyBase("p", [StrategyBase("child", [security])])
+    else:
+        strategy = StrategyBase("p", [security])
+    strategy.setup(prices, coupons=coupons, **costs)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    if nested:
+        strategy.allocate(1_000.0, child="child")
+    security = strategy.securities[0]
+    security.transact(position)
+    strategy.update(dates[0])
+    return dates, strategy, security
+
+
+@pytest.mark.parametrize(
+    ("position", "cost_long", "cost_short", "price"),
+    [
+        pytest.param(5.0, np.nan, 0.0, 100.0, id="long-nan"),
+        pytest.param(-5.0, 0.0, np.inf, 100.0, id="short-infinity"),
+        pytest.param(5.0, pd.NA, 0.0, 100.0, id="long-nullable"),
+        pytest.param(1e308, 1e308, 0.0, 0.0, id="finite-overflow"),
+        pytest.param(np.float64(1e308), 1e308, 0.0, 0.0, id="numpy-overflow"),
+    ],
+)
+def test_couponpayingsecurity_rejects_nonfinite_holding_cost_before_state_mutation(
+    position,
+    cost_long,
+    cost_short,
+    price,
+):
+    dates, _, security = _holding_cost_update_case(position, cost_long, cost_short, price)
+
+    # Snapshot every surface owned by the first-mutation operation.
+    state = (
+        security.now,
+        security._price,
+        security._value,
+        security._notl_value,
+        security._last_pos,
+        security._needupdate,
+        security._coupon,
+        security._holding_cost,
+        security._capital,
+        security.data.copy(deep=True),
+        security._prices.copy(deep=True),
+    )
+
+    with pytest.raises(ValueError, match="Holding cost must be finite"), np.errstate(all="raise"):
+        security.update(dates[1])
+
+    assert security.now == state[0]
+    assert security._price == state[1]
+    assert security._value == state[2]
+    assert security._notl_value == state[3]
+    assert security._last_pos == state[4]
+    assert security._needupdate == state[5]
+    assert security._coupon == state[6]
+    assert security._holding_cost == state[7]
+    assert security._capital == state[8]
+    pd.testing.assert_frame_equal(security.data, state[9])
+    pd.testing.assert_series_equal(security._prices, state[10])
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["flat", "nested"])
+def test_strategy_update_rejects_nonfinite_holding_cost_without_contamination(nested):
+    dates, strategy, security = _holding_cost_update_case(5.0, np.nan, 0.0, nested=nested)
+    strategy_nodes = [node for node in strategy.members if isinstance(node, StrategyBase)]
+    strategy.stale = True
+    root_stale = strategy.stale
+    strategy_state = [
+        (
+            node.now,
+            node._value,
+            node._price,
+            node._last_value,
+            node._last_price,
+            node._last_notl_value,
+            node._net_flows,
+            node._last_fee,
+            node._capital,
+            node.data.copy(deep=True),
+        )
+        for node in strategy_nodes
+    ]
+    security_data = security.data.copy(deep=True)
+
+    # The root must preflight every descendant before any Strategy mutates.
+    with pytest.raises(ValueError, match="Holding cost must be finite"), np.errstate(all="raise"):
+        strategy.update(dates[1])
+
+    assert strategy.stale is root_stale
+    for node, state in zip(strategy_nodes, strategy_state, strict=True):
+        assert node.now == state[0]
+        assert node._value == state[1]
+        assert node._price == state[2]
+        assert node._last_value == state[3]
+        assert node._last_price == state[4]
+        assert node._last_notl_value == state[5]
+        assert node._net_flows == state[6]
+        assert node._last_fee == state[7]
+        assert node._capital == state[8]
+        pd.testing.assert_frame_equal(node.data, state[9])
+    pd.testing.assert_frame_equal(security.data, security_data)
+
+    # Correcting the public input permits a same-date retry with finite history.
+    security._cost_long.loc[dates[1]] = 0.25
+    strategy.update(dates[1])
+    assert security.holding_cost == pytest.approx(1.25)
+    assert np.isfinite(security.data.loc[dates[1]]).all()
+    assert np.isfinite(strategy.data.loc[dates[1]]).all()
+
+    strategy.update(dates[2])
+    assert np.isfinite(strategy.prices).all()
+    assert np.isfinite(strategy.prices.pct_change().dropna()).all()
+
+
+@pytest.mark.parametrize("update_child", [False, True], ids=["root-update", "child-update"])
+@pytest.mark.parametrize("paper_only", [False, True], ids=["child-specific-costs", "paper-position"])
+def test_nested_holding_cost_rejection_preserves_calling_strategies(update_child, paper_only):
+    dates = pd.date_range("2010-01-01", periods=3)
+    prices = pd.DataFrame({"asset": 100.0}, index=dates)
+    coupons = prices * 0.0
+    costs = pd.DataFrame({"asset": [0.0, np.nan, 0.0]}, index=dates)
+    root = Strategy("root")
+    if paper_only:
+        child = Strategy(
+            "child",
+            [bt.algos.RunOnce(), bt.algos.WeighSpecified(asset=1.0), bt.algos.Rebalance()],
+            children=[CouponPayingSecurity("asset", fixed_income=False)],
+        )
+        root = Strategy("root", children=[child])
+        root.setup(prices, coupons=coupons, cost_long=costs)
+    else:
+        root.setup(prices, coupons=coupons)
+        child = StrategyBase("child", parent=root, children=[CouponPayingSecurity("asset")])
+        child.setup_from_parent(cost_long=costs)
+    root.adjust(1000.0)
+    root.update(dates[0])
+    child = root["child"]
+    if not paper_only:
+        child.allocate(1000.0)
+        child["asset"].transact(5.0)
+        root.update(dates[0])
+    else:
+        assert child["asset"].position == 0.0
+        assert child._paper["asset"].position > 0.0
+
+    nodes = root.members + child._paper.members
+    state = [(node.now, node._capital, node._value, node._price, node.data.copy()) for node in nodes]
+    root.stale = True
+    target = child if update_child else root
+    with pytest.raises(ValueError, match="Holding cost must be finite"):
+        target.update(dates[1])
+
+    assert root.stale
+    for node, previous in zip(nodes, state):
+        assert (node.now, node._capital, node._value, node._price) == previous[:4]
+        pd.testing.assert_frame_equal(node.data, previous[4])
+
+    for strategy in (child, child._paper):
+        strategy["asset"]._cost_long.loc[dates[1]] = 0.25
+    root.update(dates[1])
+    root.update(dates[2])
+    assert np.isfinite(root.prices).all()
+    assert np.isfinite(child.prices).all()
+    assert np.isfinite(child._paper.prices).all()
+
+
+def test_strategy_update_preflights_all_holding_costs_before_updating_a_sibling():
+    dates = pd.date_range("2010-01-01", periods=2)
+    prices = pd.DataFrame({"first": 100.0, "second": 100.0}, index=dates)
+    coupons = pd.DataFrame({"first": 0.0, "second": 0.0}, index=dates)
+    cost_long = pd.DataFrame({"first": [0.0, 0.25], "second": [0.0, np.nan]}, index=dates)
+    strategy = StrategyBase(
+        "p",
+        [CouponPayingSecurity("first"), CouponPayingSecurity("second")],
+    )
+    strategy.setup(prices, coupons=coupons, cost_long=cost_long)
+    strategy.update(dates[0])
+    strategy.adjust(1_000.0)
+    for security in strategy.securities:
+        security.transact(1.0)
+    strategy.update(dates[0])
+    state = [(node.now, node._capital, node.data.copy(deep=True)) for node in strategy.members]
+
+    # The invalid later sibling must be found before the valid first child runs.
+    with pytest.raises(ValueError, match="Holding cost must be finite"), np.errstate(all="raise"):
+        strategy.update(dates[1])
+
+    for node, previous in zip(strategy.members, state, strict=True):
+        assert node.now == previous[0]
+        assert node._capital == previous[1]
+        pd.testing.assert_frame_equal(node.data, previous[2])
+
+    strategy["second"]._cost_long.loc[dates[1]] = 0.5
+    strategy.update(dates[1])
+    assert strategy["first"].holding_cost == pytest.approx(0.25)
+    assert strategy["second"].holding_cost == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("position", "cost_long", "cost_short", "expected"),
+    [
+        pytest.param(0.0, pd.NA, np.inf, 0.0, id="closed"),
+        pytest.param(5.0, 0.25, pd.NA, 1.25, id="long-ignores-short"),
+        pytest.param(-5.0, np.nan, 0.25, 1.25, id="short-ignores-long"),
+    ],
+)
+def test_couponpayingsecurity_ignores_unapplied_nonfinite_holding_cost(
+    position,
+    cost_long,
+    cost_short,
+    expected,
+):
+    dates, _, security = _holding_cost_update_case(position, cost_long, cost_short)
+
+    security.update(dates[1])
+
+    assert security.holding_cost == pytest.approx(expected)
+    assert security.holding_costs.loc[dates[1]] == pytest.approx(expected)
 
 
 def test_couponpayingsecurity_transact():
@@ -3550,6 +4732,45 @@ def test_fi_strategy_flatten():
         assert c.value == 0
 
 
+@pytest.mark.parametrize("operation", ["close", "flatten"])
+def test_fi_strategy_closes_nested_positions(operation):
+    dates = pd.date_range("2024-01-01", periods=1)
+    data = pd.DataFrame(
+        {"direct_asset": [100.0], "nested_asset": [100.0]},
+        index=dates,
+    )
+    strategy = FixedIncomeStrategy(
+        "strategy",
+        children=[
+            SecurityBase("direct_asset"),
+            FixedIncomeStrategy("nested", children=[SecurityBase("nested_asset")]),
+        ],
+    )
+    strategy.setup(data)
+    strategy.update(dates[0])
+    nested = strategy["nested"]
+    direct_asset = strategy["direct_asset"]
+    nested_asset = nested["nested_asset"]
+    strategy.transact(5.0, "direct_asset")
+    nested.transact(10.0, "nested_asset")
+    strategy.update(dates[0])
+
+    if operation == "close":
+        strategy.close("nested")
+        expected_direct_position = 5.0
+    else:
+        strategy.flatten()
+        expected_direct_position = 0.0
+    strategy.update(dates[0])
+
+    # Reconstruct notionals from the surviving leaf positions after recursion.
+    assert direct_asset.position == expected_direct_position
+    assert nested_asset.position == 0.0
+    assert nested.notional_value == 0.0
+    assert strategy.notional_value == abs(expected_direct_position * 100.0)
+    assert strategy.value == 0.0
+
+
 def test_fi_strategy_prices():
     c1 = CouponPayingSecurity("c1")
     s = FixedIncomeStrategy("s", children=[c1])
@@ -3708,6 +4929,54 @@ def test_fi_strategy_tree_rebalance():
     assert c1.notional_value == 500
     assert c2.position == -500
     assert c2.notional_value == -500
+
+
+@pytest.mark.parametrize(
+    ("fixed_income", "expected_position"),
+    [
+        pytest.param(True, 1000.0, id="quantity-notional"),
+        pytest.param(False, 5.0, id="market-value-notional"),
+    ],
+)
+def test_fi_strategy_rebalance_respects_coupon_security_mode(
+    fixed_income,
+    expected_position,
+):
+    date = pd.Timestamp("2020-01-01")
+    prices = pd.DataFrame({"bond": [100.0]}, index=[date])
+    security = CouponPayingSecurity(
+        "bond",
+        multiplier=2,
+        fixed_income=fixed_income,
+    )
+    strategy = FixedIncomeStrategy("strategy", children=[security])
+    strategy.use_integer_positions(False)
+    strategy.setup(prices, coupons=prices * 0.0)
+    strategy.update(date)
+    security = strategy["bond"]
+
+    # The mode selects quantity or market value as the common 1000 notional target.
+    strategy.rebalance(1.0, "bond", base=1000.0)
+    assert security.fixed_income is fixed_income
+    assert security.position == pytest.approx(expected_position)
+    assert security.notional_value == pytest.approx(1000.0)
+
+    # Repeating an unchanged target must not trade or alter accounting state.
+    outlays = security.outlays.copy()
+    state = (
+        security.position,
+        strategy.capital,
+        strategy.value,
+        strategy.notional_value,
+    )
+    strategy.rebalance(1.0, "bond", base=1000.0)
+    assert (
+        security.position,
+        strategy.capital,
+        strategy.value,
+        strategy.notional_value,
+    ) == pytest.approx(state)
+    pd.testing.assert_series_equal(security.outlays, outlays)
 
 
 def test_fi_strategy_tree_rebalance_nested():
@@ -3998,7 +5267,6 @@ def test_sqrt_cost_model_matches_closed_form():
 def test_sqrt_cost_model_zero_volume_returns_zero():
     cm = SqrtCostModel()
     assert cm.cost(100.0, 50.0, 0.0, 0.02) == 0.0
-    assert cm.cost(100.0, 50.0, -1.0, 0.02) == 0.0
 
 
 def test_sqrt_cost_model_zero_quantity_returns_zero():
@@ -4035,6 +5303,49 @@ def test_almgren_chriss_cost_model_zero_volume_returns_zero():
 def test_almgren_chriss_cost_model_zero_quantity_returns_zero():
     cm = AlmgrenChrissCostModel()
     assert cm.cost(0.0, 50.0, 1_000_000.0, 0.02) == 0.0
+
+
+@pytest.mark.parametrize("cost_model_type", [SqrtCostModel, AlmgrenChrissCostModel])
+@pytest.mark.parametrize(
+    ("volume", "volatility", "invalid_input"),
+    [
+        pytest.param(-1.0, 0.02, "volume", id="negative-volume"),
+        pytest.param(np.nan, 0.02, "volume", id="missing-volume"),
+        pytest.param(np.inf, 0.02, "volume", id="positive-infinite-volume"),
+        pytest.param(-np.inf, 0.02, "volume", id="negative-infinite-volume"),
+        pytest.param(1_000_000.0, -0.02, "volatility", id="negative-volatility"),
+        pytest.param(1_000_000.0, np.nan, "volatility", id="missing-volatility"),
+        pytest.param(1_000_000.0, np.inf, "volatility", id="positive-infinite-volatility"),
+        pytest.param(1_000_000.0, -np.inf, "volatility", id="negative-infinite-volatility"),
+    ],
+)
+def test_cost_models_reject_invalid_market_inputs(
+    cost_model_type,
+    volume,
+    volatility,
+    invalid_input,
+):
+    """Market-impact inputs must not produce negative or non-finite costs."""
+    with pytest.raises(ValueError, match=invalid_input), np.errstate(all="raise"):
+        cost_model_type().cost(100.0, 50.0, volume, volatility)
+
+
+@pytest.mark.parametrize(
+    ("cost_model", "expected_cost"),
+    [
+        pytest.param(SqrtCostModel(), 0.0, id="square-root"),
+        pytest.param(AlmgrenChrissCostModel(), 2.5, id="almgren-chriss"),
+    ],
+)
+def test_cost_models_accept_zero_volatility(cost_model, expected_cost):
+    """Zero volatility is valid and preserves each model's non-impact terms."""
+    assert cost_model.cost(100.0, 50.0, 1_000_000.0, 0.0) == expected_cost
+
+
+@pytest.mark.parametrize("cost_model_type", [SqrtCostModel, AlmgrenChrissCostModel])
+def test_cost_models_zero_quantity_does_not_require_market_inputs(cost_model_type):
+    """Market inputs are inapplicable when no trade is requested."""
+    assert cost_model_type().cost(0.0, 50.0, np.nan, np.nan) == 0.0
 
 
 def test_almgren_chriss_cost_model_sign_invariance():
