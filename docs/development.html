@@ -1,19 +1,12 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Current uv development workflow</title><style>
-:root{color-scheme:light dark;--bg:#f6f8fa;--paper:#fff;--fg:#182332;--muted:#526274;--line:#d9e0e7;--accent:#1769aa}
-@media(prefers-color-scheme:dark){:root{--bg:#111820;--paper:#192330;--fg:#e6edf3;--muted:#a0b3c5;--line:#344354;--accent:#71b7ee}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,sans-serif}
-header{border-bottom:1px solid var(--line);padding:16px max(24px,calc((100vw - 1120px)/2));background:var(--paper);font-size:14px}
-main{max-width:1120px;margin:32px auto;padding:40px 48px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
-h1,h2,h3,h4{line-height:1.3;scroll-margin-top:24px}h1{font-size:2.1rem}h2{margin-top:2.5em;border-bottom:1px solid var(--line);padding-bottom:.35em}h3{margin-top:1.8em}
-a{color:var(--accent);text-underline-offset:3px}code{font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border-radius:4px;padding:2px 5px}pre{overflow:auto;border:1px solid var(--line);background:var(--bg);padding:16px;border-radius:7px}pre code{padding:0;background:none}
-table{border-collapse:collapse;width:100%;display:block;overflow-x:auto;font-size:14px}th,td{border:1px solid var(--line);padding:9px 12px;text-align:left}th{background:var(--bg)}blockquote{border-left:4px solid var(--accent);margin:16px 0;padding:4px 20px;color:var(--muted)}
-.diagram{overflow-x:auto;margin:24px 0;padding:20px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#182332}.mermaid{border:0;background:none;text-align:center}.mermaid svg{height:auto;max-width:100%}details{font-size:13px;color:#526274}.headerlink{margin-left:.4em;font-size:.7em;text-decoration:none;color:var(--muted)}
-@media(max-width:740px){main{margin:0;padding:24px 18px;border:0;border-radius:0}h1{font-size:1.7rem}.diagram{padding:8px}}
-@media print{header,details,.headerlink{display:none}body,main{background:#fff;color:#000;border:0;margin:0;padding:0}a{color:#000}.diagram,pre{break-inside:avoid}}
-</style></head><body><header>Engineering documentation · <a href="development.md">Markdown source</a></header><main><!-- ayu-maintenance-2026-10-12 -->
-<h1 id="current-uv-development-workflow">Current uv development workflow<a class="headerlink" href="#current-uv-development-workflow" title="Permanent link">&para;</a></h1>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Current uv development workflow</title><style>html{color-scheme:light dark}body{margin:0;background:#f5f7fa;color:#172333;font:16px/1.7 system-ui,sans-serif}main{max-width:1120px;margin:28px auto;background:white;padding:40px;border:1px solid #dbe2ea;border-radius:10px}h1,h2,h3{line-height:1.25}h2{margin-top:2em;border-bottom:1px solid #dbe2ea;padding-bottom:.4em}a{color:#1769aa}pre{overflow:auto;padding:16px;background:#f5f7fa;border:1px solid #dbe2ea;border-radius:6px}code{font:14px/1.6 ui-monospace,monospace}table{border-collapse:collapse;display:block;overflow:auto}th,td{border:1px solid #dbe2ea;padding:8px 12px;text-align:left;vertical-align:top}blockquote{margin-left:0;border-left:4px solid #1769aa;padding-left:18px}@media(max-width:700px){main{margin:8px;padding:18px}body{font-size:15px}}@media(prefers-color-scheme:dark){body{background:#111820;color:#e7edf5}main{background:#192330;border-color:#344354}pre{background:#111820}a{color:#78b9ef}th,td,h2,pre{border-color:#344354}}@media print{main{margin:0;border:0;padding:0}a{color:inherit}pre,table{overflow:visible}}.diagram{background:#fff;color:#172333;padding:12px;border:1px solid #dbe2ea;border-radius:6px;overflow:auto}</style></head><body><main><!-- ayu-maintenance-2026-10-12 -->
+
+<!-- current-documentation-provenance -->
+<p>Documentation reviewed: 2026-10-13 · Git source base: <code>63075945aa2c51b5aeef66e6b118c1f8b4ec7190</code> · <a href="ayu-develop.md">Current architecture and feature guide</a>.
+Historical execution commands/results below retain their original dates and scope; this metadata update is not a new application test run.</p>
+<!-- /current-documentation-provenance -->
+
+<h1 id="current-uv-development-workflow">Current uv development workflow</h1>
 <p>The maintained branch is <code>feature/ayu_develop</code>. The selected interpreter is Python <code>3.15</code>; <code>requires-python</code> records the range that was actually resolved. Python 3.15 was attempted first. Dependency/native-wheel failures and fallback evidence are recorded in <a href="validation.md">validation.md</a>.</p>
 <pre><code class="language-sh">export UV_PYTHON_PREFERENCE=only-managed
 uv python install 3.15
@@ -27,7 +20,7 @@ uv run --no-sync python -m pytest
 <p>The <code>src/</code> layout and build-backend package discovery preserve public import names. Wheel/sdist resources include the source-associated data and templates. Optional vendor SDKs, live credentials, databases and graphical/native libraries retain their original runtime requirements. Examples and test fixtures are not promoted into the library API.</p>
 <!-- prior-development-notes -->
 
-<h2 id="compatibility-decisions">Compatibility decisions<a class="headerlink" href="#compatibility-decisions" title="Permanent link">&para;</a></h2>
+<h2 id="compatibility-decisions">Compatibility decisions</h2>
 <ul>
 <li>The current Cython wheel hook discovers src/bt via setuptools package-dir. Pandas column initialization uses loc to avoid copy-on-write chained-assignment warnings.</li>
 <li>Empty/all-NaN benchmark histogram data is explicitly rejected with ValueError before density normalization; the existing cases preserve that behavior.</li>
@@ -39,7 +32,7 @@ uv run --no-sync python -m pytest
 <p><a href="../vendor/ffn/PROVENANCE.md">Verified dependency source and license: ffn</a></p>
 </li>
 </ul>
-<h1 id="develop-bt">Develop bt<a class="headerlink" href="#develop-bt" title="Permanent link">&para;</a></h1>
+<h1 id="develop-bt">Develop bt</h1>
 <p>Use Python 3.11 for the development and documentation tools. bt's runtime still supports Python 3.9 and later. Install <a href="https://docs.astral.sh/uv/">uv</a> and a C compiler for the Cython extension, then create an environment:</p>
 <pre><code class="language-bash">uv venv --python 3.11
 source .venv/bin/activate
@@ -51,7 +44,7 @@ make build
 </code></pre>
 <p>On Windows, activate with <code>.venv\Scripts\activate</code> instead. Run <code>make help</code> for available targets. <code>make test</code> runs tests without coverage; <code>make benchmark</code> runs the separate backtest benchmarks. Type checking (<code>make check-types</code>) is advisory and not a CI gate.</p>
 <p>Coverage measures the Python modules. The compiled <code>bt.core</code> extension is still tested, but excluded from coverage because it is built without Cython line tracing.</p>
-<h2 id="build-the-documentation">Build the documentation<a class="headerlink" href="#build-the-documentation" title="Permanent link">&para;</a></h2>
+<h2 id="build-the-documentation">Build the documentation</h2>
 <pre><code class="language-bash">make develop
 make docs
 make serve
@@ -69,7 +62,7 @@ python -m mdformat *.md
 <p>The export template preserves image paths, retina dimensions, and Klink CSS classes. Pandoc is not required. Review and commit the changed notebooks, exports, and images together.</p>
 <p>Pull requests build documentation and upload an HTML artifact. Successful pushes to <code>master</code> also publish to the existing <code>gh-pages</code> branch. Local builds never publish.</p>
 <p>Run <code>make docs</code> after documentation changes and check navigation, images, API links, and heading links in a browser. Preserve page basenames where possible; maintain <code>[tool.yardang.redirects]</code> when paths change. The redirects preserve legacy page URLs, including <code>bt.html</code>, and forward their fragments; renamed headings need explicit compatibility anchors. <code>docs/source/examples.md</code> includes the individual Markdown examples, which also retain their standalone URLs.</p>
-<h2 id="update-the-copier-template">Update the Copier template<a class="headerlink" href="#update-the-copier-template" title="Permanent link">&para;</a></h2>
+<h2 id="update-the-copier-template">Update the Copier template</h2>
 <p><code>.copier-answers.yaml</code> records the Cython variant of <a href="https://github.com/python-project-templates/base">python-project-templates/base</a> and the exact template revision. From a clean branch, update with:</p>
 <pre><code class="language-bash">copier update --answers-file .copier-answers.yaml --trust
 </code></pre>
@@ -77,7 +70,4 @@ python -m mdformat *.md
 <p>bt intentionally retains its MIT license, runtime Python floor, package metadata and version, Cython build hook, native wheel matrix, top-level <code>tests</code> directory, benchmarks, and Ruff line length. Documentation adopts the template's Markdown homepage while retaining Klink styling and redirecting legacy page URLs. The docs workflow builds from source because bt's CI produces platform-specific wheel artifacts.</p>
 <p>The Cython template supplies shared Python/compiler setup, native-wheel CI, and distribution smoke tests. CI builds wheels from clean sdists instead of deleting compiled files from the checkout. CI uses the template's <code>actions-ext/python/test-wheel</code> and <code>actions-ext/python/test-sdist</code> actions for installation smoke tests. bt retains its full source-tree test suite; cibuildwheel verifies that each installed wheel imports the compiled <code>bt.core</code> extension.</p>
 <p>The build workflow follows the template's Python 3.11–3.14 matrix on Linux x86_64/ARM64, macOS ARM64, and Windows x86_64. The separate release workflow retains its existing Python versions and macOS architecture selection. The runtime minimum remains unchanged.</p></main>
-<script type="module">
-import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.esm.min.mjs';
-mermaid.initialize({startOnLoad:true,securityLevel:'strict',theme:'default',flowchart:{useMaxWidth:true},sequence:{useMaxWidth:true}});
-</script></body></html>
+</body></html>

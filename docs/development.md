@@ -1,4 +1,10 @@
 <!-- ayu-maintenance-2026-10-12 -->
+
+<!-- current-documentation-provenance -->
+Documentation reviewed: 2026-10-13 · Git source base: `63075945aa2c51b5aeef66e6b118c1f8b4ec7190` · [Current architecture and feature guide](ayu-develop.md).
+Historical execution commands/results below retain their original dates and scope; this metadata update is not a new application test run.
+<!-- /current-documentation-provenance -->
+
 # Current uv development workflow
 
 The maintained branch is `feature/ayu_develop`. The selected interpreter is Python `3.15`; `requires-python` records the range that was actually resolved. Python 3.15 was attempted first. Dependency/native-wheel failures and fallback evidence are recorded in [validation.md](validation.md).

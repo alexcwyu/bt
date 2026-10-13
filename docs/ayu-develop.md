@@ -1,275 +1,193 @@
-# bt: development, architecture and operations
+# bt: workflow, design and architecture
 
-Updated 2026-10-12 on `feature/ayu_develop`; source snapshot `f75875cad03e`. This guide follows the source in this checkout and separates available interfaces from verification evidence.
+Updated: **2026-10-13**
+Reviewed Git hash: `63075945aa2c51b5aeef66e6b118c1f8b4ec7190`
+Branch: `feature/ayu_develop`
+Source diff SHA256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+Scope: **Portfolio strategy backtesting library** / Maintenance: **active**
+Languages: Python
 
-## Purpose and feature boundaries
+[HTML edition](ayu-develop.html) / [Development](development.md) / [Historical validation](validation.md) / [Full system comparison](../../docs/index.html)
 
-Composable portfolio backtesting with hierarchical strategy/security nodes, short-circuiting algorithm stacks, allocation, rebalancing and ffn result analysis.
+## Purpose and scope
 
-Node implements the shared hierarchy. StrategyBase holds capital and child nodes; SecurityBase models leaf positions. AlgoStack passes temporary and persistent strategy state through reusable algorithms. Backtest supplies dates and prices; Result delegates financial statistics to ffn. The upstream hatch-cython wheel hook compiles core.py while keeping a pure-Python source distribution.
+Simulate a tree of portfolio strategies and securities using composable algorithms and date-indexed prices.
 
-## Main workflow
+## Features and support boundaries
 
-The following is the repository-specific logical workflow. Runtime execution details remain in the linked source and the validation record.
+Native = implemented here. Integration = supplied through a named host/API. Limited = material restriction. Not provided = evidenced scope exclusion. Unverified = support/absence not established. Not applicable = outside this artifact type.
+
+| Capability | Status | Implementation and limits | Source |
+|---|---|---|---|
+| Backtesting | Native | Runs a funded strategy over historical price dates. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) |
+| Live execution | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Paper trading | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Event driven | Limited | Date-loop updates with strategy algorithms. No async event bus in this flow. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) / [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) |
+| Vectorized | Limited | Price frames and analytics are array-oriented, but state and strategies advance by date. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) |
+| Order management | Limited | Security transact changes positions and cash directly. It is not a live exchange order lifecycle. | [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
+| Order types | Limited | Transaction quantity and optional custom price with bid-offer accounting, rather than exchange order types. | [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
+| Multi venue | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Crypto | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Equities | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Futures | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Options | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Forex | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Strategy api | Native | AlgoStack composes callable algorithms in a strategy tree. | [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) / [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209)) |
+| Optimization | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Machine learning | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Reinforcement learning | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Portfolio | Native | Strategy trees and child securities carry positions, values and cash. | [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) / [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
+| Risk management | Limited | Fees, bid-offer costs and bankruptcy stop behavior. Risk selection can be expressed in algorithms. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) / [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
+| Performance analytics | Integration | Backtest computes performance through ffn calc_perf_stats. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) |
+| Historical data | Limited | Caller-supplied date-indexed price and additional-data frames. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) |
+| Streaming data | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Persistence | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Data pipeline | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Web ui | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Cli | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Monitoring | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Extension api | Native | Callable AlgoStack elements and recursive strategy children. | [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) / [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209)) |
+| Native acceleration | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+| Distributed execution | Unverified | The inspected source does not establish this capability. This is not a claim of absence. | Not applicable to this repository scope. |
+
+## System components
+
+| Component | Responsibility | Source |
+|---|---|---|
+| Backtest | Historical date loop, funding and results. | [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) |
+| Strategy | Hierarchical strategy execution. | [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) |
+| AlgoStack | Composable selection, weighting and rebalance pipeline. | [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209)) |
+| SecurityBase | Security position and transaction accounting. | [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
+
+## Architecture and component boundaries
+
+The component view summarizes inspected responsibility boundaries. Arrows identify the documented API/data dependencies; this is not a deployment-readiness claim.
 
 ```mermaid
 flowchart LR
-    S0["Build Strategy tree and AlgoStack"]
-    S1["Attach price universe"]
-    S0 --> S1
-    S2["Advance Backtest dates"]
-    S1 --> S2
-    S3["Update node values and prices"]
-    S2 --> S3
-    S4["Run selection and weighting Algos"]
-    S3 --> S4
-    S5["Rebalance and report Result"]
-    S4 --> S5
+  N0["Backtest"]
+  N1["Strategy"]
+  N2["AlgoStack"]
+  N3["SecurityBase"]
+  N0 -->|"Call strategy.setup, adjust, update and run."| N1
+  N1 -->|"Call stack(self)."| N2
 ```
 
-1. Build Strategy tree and AlgoStack.
-2. Attach price universe.
-3. Advance Backtest dates.
-4. Update node values and prices.
-5. Run selection and weighting Algos.
-6. Rebalance and report Result.
+- Call strategy.setup, adjust, update and run.: [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+- Call stack(self).: [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267))
 
-## Components and ownership
+## Design decisions
 
-The entry point composes the source modules below; arrows indicate review/navigation boundaries rather than a claim that every module is called in every run.
+| Decision | Rationale | Tradeoff | Evidence |
+|---|---|---|---|
+| A tree models portfolios and nested strategies. | Each node participates in shared update and transaction accounting. | Execution is date-based and direct transaction accounting rather than venue messaging. | [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) / [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) |
 
-```mermaid
-flowchart TB
-    User["Application / research entry point"]
-    M0["core.py"]
-    User --> M0
-    M1["algos.py"]
-    User --> M1
-    M2["backtest.py"]
-    User --> M2
-    M3["__init__.py"]
-    User --> M3
-    M4["tests/__init__.py"]
-    User --> M4
-    M5["tests/bench.py"]
-    User --> M5
-    M6["tests/test_algos.py"]
-    User --> M6
-    M7["tests/test_backtest.py"]
-    User --> M7
-```
-
-| Source | Declared classes / functions | Implementation role |
-|---|---|---|
-| [src/bt/core.py](../src/bt/core.py) | Node, StrategyBase, SecurityBase, Security, FixedIncomeSecurity, CouponPayingSecurity; is_zero | Contains the core building blocks of the framework. |
-| [src/bt/algos.py](../src/bt/algos.py) | PrintDate, PrintTempData, PrintInfo, Debug, RunOnce, RunPeriod; run_always, _select_by_price, _validate_transaction_security, _transaction_quantity_is_noop | A collection of Algos used to create Strategy logic. |
-| [src/bt/backtest.py](../src/bt/backtest.py) | Backtest, Result, RandomBenchmarkResult, RenormalizedFixedIncomeResult; run, benchmark_random | Contains backtesting logic and objects. |
-| [src/bt/__init__.py](../src/bt/__init__.py) | Package data / configuration | See the public declarations and implementation linked here. |
-| [tests/__init__.py](../tests/__init__.py) | Package data / configuration | See the public declarations and implementation linked here. |
-| [tests/bench.py](../tests/bench.py) | benchmark_1, benchmark_2, benchmark_3 | Performance benchmarks |
-| [tests/test_algos.py](../tests/test_algos.py) | DummyAlgo; test_algo_name, test_algo_stack, test_print_temp_data, test_print_info | See the public declarations and implementation linked here. |
-| [tests/test_backtest.py](../tests/test_backtest.py) | test_backtest_copies_strategy, test_backtest_dates_set, test_backtest_rejects_unsorted_dates, test_backtest_accepts_monotonic_duplicate_dates | See the public declarations and implementation linked here. |
-| [tests/test_core.py](../tests/test_core.py) | DeterministicHashString; test_data_and_history_stay_current_after_numpy_read, test_setup_resets_bidoffer_mode, test_security_without_universe_prices_preserves_missing_history, test_node_tree1 | See the public declarations and implementation linked here. |
-| [pyproject.toml](../pyproject.toml) | Package data / configuration | See the public declarations and implementation linked here. |
-| [hatch_build.py](../hatch_build.py) | CustomBuildHook | Hatch build hook for Cython compilation. |
-
-## Class design
-
-Methods and inheritance edges are taken from the selected declarations in the actual source. A missing edge means composition or an external base is not asserted here.
+## Class and interface relationships
 
 ```mermaid
 classDiagram
-    class Node {
-        +__init__()
-        +data()
-        +data()
-        +use_integer_positions()
-        +fixed_income()
-    }
-    class StrategyBase {
-        +__init__()
-        +price()
-        +prices()
-        +values()
-        +notional_values()
-    }
-    Node <|-- StrategyBase
-    class SecurityBase {
-        +__init__()
-        +price()
-        +prices()
-        +values()
-        +notional_values()
-    }
-    Node <|-- SecurityBase
-    class Algo {
-        +__init__()
-        +name()
-    }
-    class AlgoStack {
-        +__init__()
-    }
-    Algo <|-- AlgoStack
-    class Strategy {
-        +__init__()
-        +run()
-    }
-    StrategyBase <|-- Strategy
-    class Backtest {
-        +__init__()
-        +run()
-        +weights()
-        +positions()
-        +security_weights()
-    }
+  class N0["Backtest"] {
+    <<class>>
+    +run()
+  }
+  class N1["Strategy"] {
+    <<class>>
+    +run()
+  }
+  class N2["AlgoStack"] {
+    <<class>>
+    +__call__()
+  }
+  class N3["SecurityBase"] {
+    <<class>>
+    +transact()
+  }
+  N0 *-- N1 : Backtest retains and executes its strategy tree.
+  N1 *-- N2 : Strategy calls its retained stack.
 ```
 
-## End-to-end interaction
+Each node is a reviewed source symbol. Function/module nodes are explicitly labeled; they do not imply Python classes. Only reviewed relationships are drawn.
 
-This sequence presents the responsibilities of the main workflow, including the state/result boundary. The linked classes and functions provide the exact method-level contract.
+- **Backtest** (class): [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+- **Strategy** (class): [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267))
+- **AlgoStack** (class): [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209))
+- **SecurityBase** (class): [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762))
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Entry as Build Strategy tree and AlgoStack
-    participant Process as Advance Backtest dates
-    participant State as Run selection and weighting Algos
-    participant Output as Rebalance and report Result
-    User->>Entry: Supply configuration and inputs
-    Entry->>Process: Attach price universe
-    Process->>State: Update node values and prices
-    State-->>Process: Updated execution / calculation state
-    Process->>Output: Produce results
-    Output-->>User: Report outcomes
-```
+## Workflow
 
-## Source dependency direction
+### Representative source-backed flow
 
-These edges are actual explicit imports between the selected source modules. Dynamic imports, re-exports and third-party internals are omitted.
-
-```mermaid
-flowchart LR
-    I0["core"]
-    I1["algos"]
-    I2["backtest"]
-    I3["__init__"]
-    I4["__init__"]
-    I5["bench"]
-    I6["test_algos"]
-    I7["test_backtest"]
-    I8["test_core"]
-    I9["pyproject"]
-    I1 --> I0
-    I6 --> I1
-    I8 --> I0
-```
-
-## Design details and extension points
-
-### `Node`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-The Node is the main building block in bt's tree structure design.
-Both StrategyBase and SecurityBase inherit Node. It contains the
-core functionality of a tree node.
-
-- `data`: See implementation for the complete contract.
-- `data`: See implementation for the complete contract.
-- `use_integer_positions`: Set indicator to use (or not) integer positions for a given strategy or security.
-- `fixed_income`: Whether the node is a fixed income node (using notional weighting).
-- `prices`: A TimeSeries of the Node's price.
-
-### `StrategyBase`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-Strategy Node. Used to define strategy logic within a tree.
-A Strategy's role is to allocate capital to it's children
-based on a function.
-
-- `price`: Current price.
-- `prices`: TimeSeries of prices.
-- `values`: TimeSeries of values.
-- `notional_values`: TimeSeries of notional values.
-- `capital`: Current capital - amount of unallocated capital left in strategy.
-
-### `SecurityBase`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-Security Node. Used to define a security within a tree.
-A Security's has no children. It simply models an asset that can be bought
-or sold.
-
-- `price`: Current price.
-- `prices`: TimeSeries of prices.
-- `values`: TimeSeries of values.
-- `notional_values`: TimeSeries of notional values.
-- `position`: Current position
-
-### `Algo`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-Algos are used to modularize strategy logic so that strategy logic becomes
-modular, composable, more testable and less error prone. Basically, the
-Algo should follow the unix philosophy - do one thing well.
-
-- `name`: Algo name.
-
-### `AlgoStack`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-An AlgoStack derives from Algo runs multiple Algos until a
-failure is encountered.
-
-
-### `Strategy`
-
-Source: [src/bt/core.py](../src/bt/core.py).
-
-Strategy expands on the StrategyBase and incorporates Algos.
-
-- `run`: See implementation for the complete contract.
-
-### `Backtest`
-
-Source: [src/bt/backtest.py](../src/bt/backtest.py).
-
-A Backtest combines a Strategy with data to
-produce a Result.
-
-- `run`: Runs the Backtest.
-- `weights`: DataFrame of each component's weight over time
-- `positions`: DataFrame of each component's position over time
-- `security_weights`: DataFrame containing weights of each security as a percentage of the whole portfolio over time
-- `herfindahl_index`: Calculate Herfindahl-Hirschman Index (HHI) for invested securities. For each day, signed security values (notionals for fixed income) are normalized by total absolute security exposure before they are squared and summed. Cash is excluded, so HHI varies from 1/N for N equally exposed securities to 1
-
-## Repository layout and resources
-
-Installable packages live under `src/`. `pyproject.toml` defines package metadata, build requirements, optional integrations and development dependencies; `uv.lock` records resolved versions, and `.python-version` selects the local interpreter. This layout keeps an accidental checkout import from substituting for the installed wheel. Package resources remain beside their owning modules and are included by the build backend. Existing upstream examples, fixtures, scripts and documentation retain their separate roles.
-
-## Maintenance compatibility and evidence
-
-- The current Cython wheel hook discovers src/bt via setuptools package-dir. Pandas column initialization uses loc to avoid copy-on-write chained-assignment warnings.
-- Empty/all-NaN benchmark histogram data is explicitly rejected with ValueError before density normalization; the existing cases preserve that behavior.
-- Verified licensed ffn 1.4.1 source handles total-loss log returns as -inf and undefined below-total-loss values as NaN without warning filters. See vendor/ffn/PROVENANCE.md.
-- mdformat is capped below0.8 because current mdformat-tables 1.0.0 requires that API family. Python 3.15 actual source installation succeeds.
-
-## Development and verification workflow
+The steps describe the inspected implementation. User configuration and data inputs are external prerequisites.
 
 ```mermaid
 flowchart TD
-    Checkout["feature/ayu_develop"] --> Lock["uv lock --upgrade"]
-    Lock --> Sync["uv sync --frozen --all-extras --all-groups"]
-    Sync --> Compile["python -m compileall src"]
-    Sync --> Test["Existing complete test suite"]
-    Compile --> Build["uv build wheel and sdist"]
-    Test --> Evidence["Record exact exits and blockers"]
-    Build --> Evidence
-    Evidence --> Review["Review documentation and commit"]
+  W0["Set up strategy with prices and allocate initial capital."]
+  W1["Advance the strategy to the current price date."]
+  W0 --> W1
+  W2["Run the algorithm stack and recurse into children."]
+  W1 --> W2
+  W3["Apply transactions to positions and parent cash when instructed by an algorithm."]
+  W2 --> W3
+  W4["Calculate ffn performance statistics after the date loop."]
+  W3 --> W4
 ```
 
-See [development commands](development.md) and [validation evidence](validation.md) for interpreter selection, dependency exceptions, full-suite results and remaining blockers. No additional test cases were introduced by this maintenance.
+1. Set up strategy with prices and allocate initial capital.. [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+2. Advance the strategy to the current price date.. [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+3. Run the algorithm stack and recurse into children.. [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267))
+4. Apply transactions to positions and parent cash when instructed by an algorithm.. [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762))
+5. Calculate ffn performance statistics after the date loop.. [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+
+## Sequence
+
+Representative calls and data dependencies
+
+Messages represent inspected calls or explicitly labelled data dependencies. A data dependency is not an asserted direct runtime call.
+
+```mermaid
+sequenceDiagram
+  participant N0 as Backtest
+  participant N1 as Strategy
+  participant N2 as AlgoStack
+  participant N3 as SecurityBase
+  N0->>N1: Call strategy.setup, adjust, update and run.
+  N1->>N2: Call stack(self).
+```
+
+- Call strategy.setup, adjust, update and run.: [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408))
+- Call stack(self).: [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267))
+
+## Strengths and limits
+
+### Strengths
+
+- Composable algorithms can short-circuit while mandatory run_always operations continue. [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209))
+
+### Limitations
+
+- User-supplied prices and modeled costs determine historical accounting. External order acknowledgements are not modeled by transact. [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762))
+
+## Validation scope
+
+The linked validation and command records preserve actual historical runs and user-authorized exclusions. This source/document review does not rerun application tests, establish live trading readiness or rank benchmark performance. Current data, credential and runtime prerequisites remain material.
+
+[Repository validation](validation.md) / [Executed checks](maintenance/index.md)
+
+## Source map
+
+| Reviewed symbol/path | Inspected responsibility | Actual file SHA256 |
+|---|---|---|
+| [Backtest.run](../src/bt/backtest.py) ([L408](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/backtest.py#L408)) | Sets up and funds the strategy, bootstraps one row, updates each date, runs the strategy and calculates ffn performance stats. | `f534771a6a9d4cee16d3c120edb4e4995ca903d23a58d5071fd1ee5f10ace831` |
+| [Strategy.run](../src/bt/core.py) ([L2267](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2267)) | Clears temporary state, calls its AlgoStack, then recursively runs child nodes. | `30e265f03c5e99b80fb17e91ef0d9e99388c24bc561a65e07f175bc65c914f21` |
+| [AlgoStack.__call__](../src/bt/core.py) ([L2209](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L2209)) | Runs algorithms sequentially, short-circuits on false and preserves run_always algorithms. | `30e265f03c5e99b80fb17e91ef0d9e99388c24bc561a65e07f175bc65c914f21` |
+| [SecurityBase.transact](../src/bt/core.py) ([L1762](https://github.com/alexcwyu/bt/blob/63075945aa2c51b5aeef66e6b118c1f8b4ec7190/src/bt/core.py#L1762)) | Computes outlay, fees and bid-offer costs, validates finiteness, updates position and adjusts parent cash. | `30e265f03c5e99b80fb17e91ef0d9e99388c24bc561a65e07f175bc65c914f21` |
+
+## Documentation provenance
+
+Review date: 2026-10-13. Full committed source HEAD: `63075945aa2c51b5aeef66e6b118c1f8b4ec7190`. Template version: 2. 2 source files were independently hashed for this guide.
+
+[Evidence catalog](../../docs/systems-2026-10-13/catalog.json) / [Standard template](../../docs/guidelines/APP_TEMPLATE.md)
+
+- Snapshot provenance: inventory.json full HEAD 63075945aa2c51b5aeef66e6b118c1f8b4ec7190, branch feature/ayu_develop. Source was inspected in the existing checkout and no repository files were changed.
+- Inspected implementation bodies and existing architecture documentation. This is a representative static source audit, not a runtime or live-service validation. Credential exclusions in current validation are policy, not evidence that a live connection succeeds.
+- Inspected source files: src/bt/backtest.py, src/bt/core.py
